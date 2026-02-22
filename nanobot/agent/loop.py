@@ -66,6 +66,7 @@ class AgentLoop:
         config: object | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
+
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
@@ -115,11 +116,13 @@ class AgentLoop:
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(ExecTool(
-            working_dir=str(self.workspace),
-            timeout=self.exec_config.timeout,
-            restrict_to_workspace=self.restrict_to_workspace,
-        ))
+        self.tools.register(
+            ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+            )
+        )
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
@@ -133,6 +136,7 @@ class AgentLoop:
             return
         self._mcp_connecting = True
         from nanobot.agent.tools.mcp import connect_mcp_servers
+
         try:
             self._mcp_stack = contextlib.AsyncExitStack()
             await self._mcp_stack.__aenter__()
@@ -168,11 +172,13 @@ class AgentLoop:
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
+
         def _fmt(tc):
             val = next(iter(tc.arguments.values()), None) if tc.arguments else None
             if not isinstance(val, str):
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _chat_with_fallback(
@@ -200,13 +206,17 @@ class AgentLoop:
             isinstance(content, str) and content.startswith("Error calling LLM:")
         )
         is_fallback_error = is_error and any(
-            kw in content for kw in ("rate_limit", "RateLimitError", "overloaded", "AuthenticationError", "quota")
+            kw in content
+            for kw in ("rate_limit", "RateLimitError", "overloaded", "AuthenticationError", "quota")
         )
 
         if is_fallback_error:
-            logger.warning("Primary provider error — falling back to local glm-4.7-flash: {}", content[:120])
+            logger.warning(
+                "Primary provider error — falling back to local glm-4.7-flash: {}", content[:120]
+            )
             try:
                 from nanobot.providers.custom_provider import CustomProvider
+
                 fallback = CustomProvider(
                     api_key="lm-studio",
                     api_base="http://localhost:1234/v1",
@@ -222,7 +232,10 @@ class AgentLoop:
                 logger.info("Fallback to glm-4.7-flash succeeded")
             except Exception as e:
                 logger.error("Fallback provider also failed: {}", e)
-                return LLMResponse(content=f"Both primary and fallback providers failed: {e}", finish_reason="error")
+                return LLMResponse(
+                    content=f"Both primary and fallback providers failed: {e}",
+                    finish_reason="error",
+                )
 
         return response
 
@@ -265,13 +278,15 @@ class AgentLoop:
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-                        }
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                        },
                     }
                     for tc in response.tool_calls
                 ]
                 messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
+                    messages,
+                    response.content,
+                    tool_call_dicts,
                     reasoning_content=response.reasoning_content,
                 )
 
@@ -295,32 +310,39 @@ class AgentLoop:
         await self._connect_mcp()
         try:
             await self.context_tracker._load_initial_context()
-            logger.info("Context tracker initialized with {} models", len(self.context_tracker.context_usage))
+            logger.info(
+                "Context tracker initialized with {} models",
+                len(self.context_tracker.context_usage),
+            )
         except Exception as e:
             logger.warning("Context tracker initialization failed (non-fatal): {}", e)
         logger.info("Agent loop started")
 
         while self._running:
             try:
-                msg = await asyncio.wait_for(
-                    self.bus.consume_inbound(),
-                    timeout=1.0
-                )
+                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
                 try:
                     response = await self._process_message(msg)
                     if response is not None:
                         await self.bus.publish_outbound(response)
                     elif msg.channel == "cli":
-                        await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id, content="", metadata=msg.metadata or {},
-                        ))
+                        await self.bus.publish_outbound(
+                            OutboundMessage(
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
+                                content="",
+                                metadata=msg.metadata or {},
+                            )
+                        )
                 except Exception as e:
                     logger.error("Error processing message: {}", e)
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {e!s}"
-                    ))
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel=msg.channel,
+                            chat_id=msg.chat_id,
+                            content=f"Sorry, I encountered an error: {e!s}",
+                        )
+                    )
             except TimeoutError:
                 continue
 
@@ -345,22 +367,28 @@ class AgentLoop:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
-            channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
-                                else ("cli", msg.chat_id))
+            channel, chat_id = (
+                msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
+            )
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             messages = self.context.build_messages(
                 history=session.get_history(max_messages=self.memory_window),
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content,
+                channel=channel,
+                chat_id=chat_id,
             )
             final_content, _ = await self._run_agent_loop(messages)
             session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
             session.add_message("assistant", final_content or "Background task completed.")
             self.sessions.save(session)
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            return OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=final_content or "Background task completed.",
+            )
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -383,11 +411,17 @@ class AgentLoop:
 
             task = asyncio.create_task(_consolidate_and_cleanup())
             task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started. Memory consolidation in progress.")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="New session started. Memory consolidation in progress.",
+            )
         if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands",
+            )
 
         if len(session.messages) > self.memory_window and session.key not in self._consolidating:
             self._consolidating.add(session.key)
@@ -409,18 +443,25 @@ class AgentLoop:
             history=session.get_history(max_messages=self.memory_window),
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
         )
 
         async def _bus_progress(content: str) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
-            await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
-            ))
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
 
         final_content, tools_used = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
@@ -430,8 +471,9 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         session.add_message("user", msg.content)
-        session.add_message("assistant", final_content,
-                            tools_used=tools_used if tools_used else None)
+        session.add_message(
+            "assistant", final_content, tools_used=tools_used if tools_used else None
+        )
         self.sessions.save(session)
 
         if (
@@ -442,15 +484,20 @@ class AgentLoop:
             return None
 
         return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=final_content,
             metadata=msg.metadata or {},
         )
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> None:
         """Delegate to MemoryStore.consolidate()."""
         await MemoryStore(self.workspace).consolidate(
-            session, self.provider, self.model,
-            archive_all=archive_all, memory_window=self.memory_window,
+            session,
+            self.provider,
+            self.model,
+            archive_all=archive_all,
+            memory_window=self.memory_window,
         )
 
     async def process_direct(
@@ -466,9 +513,14 @@ class AgentLoop:
         if not self.context_tracker.context_usage:
             try:
                 await self.context_tracker._load_initial_context()
-                logger.info("Context tracker initialized with {} models", len(self.context_tracker.context_usage))
+                logger.info(
+                    "Context tracker initialized with {} models",
+                    len(self.context_tracker.context_usage),
+                )
             except Exception as e:
                 logger.warning("Context tracker initialization failed (non-fatal): {}", e)
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg, session_key=session_key, on_progress=on_progress
+        )
         return response.content if response else ""

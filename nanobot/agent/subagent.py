@@ -1,6 +1,9 @@
 """Subagent manager for background task execution."""
 
+from __future__ import annotations
+
 import asyncio
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -14,12 +17,12 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
 from nanobot.providers.registry import list_models
 
 if TYPE_CHECKING:
+    from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import Config, ExecToolConfig
+    from nanobot.providers.base import LLMProvider
 
 
 class SubagentManager:
@@ -31,6 +34,10 @@ class SubagentManager:
     the main agent (e.g. a local LM Studio model for vision tasks).
     """
 
+    PENDING_TIMEOUT_SECS = 300
+    EXECUTION_TIMEOUT_SECS = 1200
+    MAX_RETRY_COUNT = 3
+
     def __init__(
         self,
         provider: LLMProvider,
@@ -40,9 +47,9 @@ class SubagentManager:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         brave_api_key: str | None = None,
-        exec_config: "ExecToolConfig | None" = None,
+        exec_config: ExecToolConfig | None = None,
         restrict_to_workspace: bool = False,
-        config: "Config | None" = None,
+        config: Config | None = None,
         db_path: Path | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
@@ -348,6 +355,7 @@ class SubagentManager:
             max_iterations = 15
             iteration = 0
             final_result: str | None = None
+            first_response_processed = False
 
             while iteration < max_iterations:
                 iteration += 1
@@ -359,6 +367,11 @@ class SubagentManager:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 )
+
+                # Call set_running after first successful response
+                if iteration == 1 and not first_response_processed:
+                    self.registry.set_running(task_id)
+                    first_response_processed = True
 
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
@@ -435,6 +448,11 @@ Result:
 
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
 
+        # Tag out in registry
+        registry_status = "completed" if status == "ok" else "failed"
+        result_summary = result[:200]
+        self.registry.tag_out(task_id, registry_status, result_summary)
+
         # Inject as system message to trigger main agent
         msg = InboundMessage(
             channel="system",
@@ -489,3 +507,106 @@ When you have completed the task, provide a clear summary of your findings or ac
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)
+
+    async def check_timeouts(self) -> None:
+        """
+        Check for timed-out tasks and handle them appropriately.
+
+        For pending tasks (never got a first LLM response):
+        - If age > 300 seconds (5 min), cancel and handle based on retry count
+        For running tasks (got a response but still running):
+        - If age > 1200 seconds (20 min), cancel and mark as lost with stack frame
+        """
+        now = datetime.now(UTC)
+
+        for task_row in self.registry.get_all_active():
+            task_id = task_row["id"]
+            status = task_row["status"]
+            origin = task_row["origin"]
+            retry_count = task_row["retry_count"] or 0
+
+            spawned_at_str = task_row["spawned_at"]
+
+            try:
+                spawned_at = datetime.fromisoformat(spawned_at_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    "Subagent [{}] invalid spawned_at '{}': {}", task_id, spawned_at_str, e
+                )
+                continue
+
+            age_seconds = (now - spawned_at).total_seconds()
+
+            if status == "pending" and age_seconds > self.PENDING_TIMEOUT_SECS:
+                await self._handle_pending_timeout(task_id, origin, retry_count)
+
+            elif status == "running" and age_seconds > self.EXECUTION_TIMEOUT_SECS:
+                await self._handle_execution_timeout(task_id)
+
+    async def _handle_pending_timeout(self, task_id: str, origin: str, retry_count: int) -> None:
+        """Handle a pending task that has timed out."""
+        task = self._running_tasks.get(task_id)
+
+        if task is not None and not task.done():
+            task.cancel()
+            logger.warning("Subagent [{}] cancelled due to pending timeout", task_id)
+        else:
+            logger.warning(
+                "Subagent [{}] task not found in _running_tasks or already done", task_id
+            )
+
+        if retry_count < self.MAX_RETRY_COUNT and origin == "cron":
+            self.registry.mark_requeue(task_id)
+            logger.info("Subagent [{}] requeued (retry_count={})", task_id, retry_count)
+        else:
+            self.registry.mark_lost(task_id)
+            self._log_discord_alert(
+                task_id=task_id,
+                label=task_id,
+                message="Task timed out as pending (max retries or user origin)",
+            )
+            logger.error("Subagent [{}] lost (max retries or user origin)", task_id)
+
+    async def _handle_execution_timeout(self, task_id: str) -> None:
+        """Handle a running task that has exceeded execution timeout."""
+        task = self._running_tasks.get(task_id)
+
+        stack_frame = ""
+        if task is not None and not task.done():
+            try:
+                stack = task.get_stack()
+                if stack:
+                    frame = stack[-1]
+                    frame_str = (
+                        f"{frame.f_code.co_filename}:{frame.f_lineno} in {frame.f_code.co_name}"
+                    )
+                    stack_frame = frame_str
+            except Exception as e:
+                logger.warning("Subagent [{}] could not get stack frame: {}", task_id, e)
+
+            task.cancel()
+            logger.warning("Subagent [{}] cancelled due to execution timeout", task_id)
+
+        self.registry.mark_lost(task_id, stack_frame=stack_frame)
+        self._log_discord_alert(
+            task_id=task_id,
+            label=task_id,
+            message="Task timed out during execution",
+            stack_frame=stack_frame,
+        )
+        logger.error("Subagent [{}] lost (execution timeout)", task_id)
+
+    def _log_discord_alert(
+        self, task_id: str, label: str, message: str, stack_frame: str = ""
+    ) -> None:
+        """
+        Log Discord alert at ERROR level.
+
+        Note: Full Discord integration will be wired in milestone 10.7.
+        For now, logs the alert details for manual handling.
+        """
+        alert_msg = f"[Discord Alert] Subagent '{label}' ({task_id}): {message}"
+        if stack_frame:
+            alert_msg += f" | Stack: {stack_frame}"
+
+        logger.error(alert_msg)
