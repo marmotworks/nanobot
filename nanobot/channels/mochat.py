@@ -13,13 +13,14 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from loguru import logger
 
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.schema import MochatConfig
 from nanobot.utils.helpers import get_data_path
 
 if TYPE_CHECKING:
-    from nanobot.bus.events import OutboundMessage
-    from nanobot.bus.queue import MessageBus
-    from nanobot.config.schema import MochatConfig
+    ...
 
 try:
     import socketio
