@@ -16,8 +16,12 @@ class FailureRecord:
     """Records a failed tool call."""
     tool_name: str
     error_message: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(init=False)
     attempts: int = 1
+
+    def __post_init__(self):
+        """Set timestamp with microsecond precision."""
+        self.timestamp = datetime.now()
 
 
 class FailureTracker:

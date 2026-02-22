@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.context_tracker import ContextTracker
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -60,6 +61,7 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
+        config: "Any | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -88,8 +90,10 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            config=config,
         )
         self.policy_manager = PolicyManager(workspace / "config" / "policies.json")
+        self.context_tracker = ContextTracker(provider)
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -98,6 +102,10 @@ class AgentLoop:
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
         self._register_default_tools()
+
+    def set_context_tracker(self, context_tracker: ContextTracker) -> None:
+        """Set the context tracker for the ContextBuilder."""
+        self.context.context_tracker = context_tracker
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""

@@ -462,6 +462,29 @@ def find_by_name(name: str) -> ProviderSpec | None:
     return None
 
 
+# Map provider class names to spec names for validation in subagents
+PROVIDER_CLASS_TO_SPEC_NAME: dict[str, str] = {
+    "customprovider": "custom",
+    # Add more mappings as needed for other providers
+}
+
+
+def find_by_class_name(class_name: str) -> ProviderSpec | None:
+    """Find a provider spec by Python class name (e.g., "CustomProvider")."""
+    # Try exact match first
+    spec = find_by_name(class_name.lower().replace("provider", ""))
+    if spec:
+        return spec
+
+    # Try class name mapping
+    class_name_lower = class_name.lower()
+    for class_key, spec_name in PROVIDER_CLASS_TO_SPEC_NAME.items():
+        if class_name_lower == class_key or class_name_lower.startswith(class_key):
+            return find_by_name(spec_name)
+
+    return None
+
+
 async def list_models(
     provider_name: str | None = None,
     api_key: str | None = None,
@@ -472,6 +495,7 @@ async def list_models(
 
     Args:
         provider_name: The config key for the provider (e.g., "custom", "openai")
+                     or class name (e.g., "CustomProvider")
         api_key: Provider API key
         api_base: Provider base URL
 
@@ -486,6 +510,10 @@ async def list_models(
     # Find provider spec
     spec = None
     if provider_name:
+        # Convert class name to spec name if needed
+        provider_name_lower = provider_name.lower()
+        if provider_name_lower in PROVIDER_CLASS_TO_SPEC_NAME:
+            provider_name = PROVIDER_CLASS_TO_SPEC_NAME[provider_name_lower]
         spec = find_by_name(provider_name)
     else:
         # Auto-detect gateway/local provider
@@ -494,14 +522,19 @@ async def list_models(
     if not spec:
         return []
 
+    # For custom provider, use its own get_models() method
+    if spec.is_direct and spec.name == "custom" and api_base and api_key:
+        from nanobot.providers.custom_provider import CustomProvider
+        provider = CustomProvider(api_key=api_key, api_base=api_base)
+        models_data = await provider.get_models()
+        return [m["id"] for m in models_data if m.get("id")]
+
     # For gateways and local providers, try to query models from the API
     if spec.is_gateway or spec.is_local:
         return await _list_models_from_gateway(spec, api_key, api_base)
 
     # For direct providers, return default model
     if spec.is_direct:
-        # For custom provider, we'd need to instantiate it to get models
-        # This is a simplification - in practice, you'd need to handle each provider
         return []
 
     # For standard providers, return empty list (they don't have model listing)

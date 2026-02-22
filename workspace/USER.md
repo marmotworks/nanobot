@@ -1,49 +1,35 @@
 # User Profile
 
-Information about the user to help personalize interactions.
-
 ## Basic Information
 
-- **Name**: (your name)
-- **Timezone**: (your timezone, e.g., UTC+8)
-- **Language**: (preferred language)
+- **Name**: Mike
+- **Timezone**: CST
+- **Language**: English
+- **Platform**: Discord
 
-## Preferences
+## Communication Style
 
-### Communication Style
+- Casual, direct, and concise
+- Emoji use is fine in moderation
+- No need to over-explain — trust that Mike is technical
 
-- [ ] Casual
-- [ ] Professional
-- [ ] Technical
+## Technical Level
 
-### Response Length
+- Expert
+- MacBook Pro, arm64, Python
+- Local LM Studio models (qwen3-coder-next, glm-4.7-flash, glm-4.6v-flash)
+- Primary project: nanobot (at /Users/mhall/Workspaces/nanobot)
 
-- [ ] Brief and concise
-- [ ] Detailed explanations
-- [ ] Adaptive based on question
+## Operational Preferences
 
-### Technical Level
-
-- [ ] Beginner
-- [ ] Intermediate
-- [ ] Expert
+- **Codebase changes go directly to `/Users/mhall/Workspaces/nanobot/`** — never as overlays in `.nanobot/workspace/`
+- **Primary agent loop is for discussion and oversight only** — delegate task execution to subagents
+- **Favor rigorous task decomposition and milestone tracking** — break work into clear, verifiable steps
+- **Write tests that validate intended behavior** — be critical of tests; prefer meaningful coverage over superficial coverage
+- **Improve consistency wherever possible** — naming conventions, style, and structure should be resilient and easy for the agent to reason about
+- **Follow existing conventions** in naming and code style; prefer clarity and predictability
 
 ## Work Context
 
-- **Primary Role**: (your role, e.g., developer, researcher)
-- **Main Projects**: (what you're working on)
-- **Tools You Use**: (IDEs, languages, frameworks)
-
-## Topics of Interest
-
-- 
-- 
-- 
-
-## Special Instructions
-
-(Any specific instructions for how the assistant should behave)
-
----
-
-*Edit this file to customize nanobot's behavior for your needs.*
+- **Main Project**: nanobot — an AI assistant framework with subagent support, local LLM integration via LM Studio, Discord gateway, and skill system
+- **Tools**: Python 3.14, LM Studio, Discord, brew, git

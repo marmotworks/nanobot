@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 from nanobot.agent.subagent import SubagentManager
 from nanobot.bus import MessageBus
-from nanobot.provider import LLMProvider
+from nanobot.providers.custom_provider import CustomProvider
 
 
 @pytest.mark.asyncio
@@ -16,10 +16,10 @@ async def test_subagent_manager_accepts_model():
     workspace.mkdir(exist_ok=True)
     
     # Create a mock provider
-    provider = LLMProvider(
-        name="test",
-        api_key="test-key",
-        api_base="http://localhost:1234/v1"
+    provider = CustomProvider(
+        api_key="lm-studio",
+        api_base="http://localhost:1234/v1",
+        default_model="zai-org/glm-4.7-flash"
     )
     
     bus = MessageBus()

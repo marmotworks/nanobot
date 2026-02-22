@@ -25,6 +25,7 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
         self.failure_tracker = failure_tracker
+        self.context_tracker = None  # Will be set by AgentLoop
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
@@ -74,6 +75,12 @@ Skills with available="false" need dependencies installed first - you can try in
             failure_summary = self.failure_tracker.get_failure_summary()
             if failure_summary:
                 parts.append(failure_summary)
+
+        # Context window usage
+        if self.context_tracker:
+            context_info = self.context_tracker.format_usage()
+            if context_info:
+                parts.append(f"# Context Window Usage\n\n{context_info}")
 
         return "\n\n---\n\n".join(parts)
     

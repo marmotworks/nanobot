@@ -27,7 +27,18 @@ class PolicyManager:
 
     def get_subagent_default(self, task_type: str) -> str:
         """Get default model for a task type."""
-        return self.config["model_policies"]["subagent_defaults"][task_type]
+        # Map task_type to config key
+        key_map = {
+            "technical": "technical_tasks",
+            "vision": "vision_tasks"
+        }
+        config_key = key_map.get(task_type, task_type)
+
+        # Fallback to technical if unknown task type
+        if config_key not in self.config["model_policies"]["subagent_defaults"]:
+            config_key = "technical_tasks"
+
+        return self.config["model_policies"]["subagent_defaults"][config_key]
 
     def is_model_forbidden_for_subagents(self, model: str) -> bool:
         """Check if a model is forbidden for subagents."""
@@ -72,13 +83,13 @@ class PolicyManager:
         # Check if model is appropriate for task type
         if task_type == "vision" and model != "glm-4.6v-flash":
             return False, (
-                f"Vision tasks require the 'glm-4.6v-flash' model. "
+                f"vision tasks require the 'glm-4.6v-flash' model. "
                 f"Current selection: '{model}'."
             )
 
         if task_type == "technical" and model == "glm-4.6v-flash":
             return False, (
-                f"Technical tasks should use 'qwen3-coder-next' model. "
+                f"technical tasks should use 'qwen3-coder-next' model. "
                 f"Current selection: '{model}' (vision model)."
             )
 

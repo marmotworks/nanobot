@@ -50,12 +50,21 @@ class CustomProvider(LLMProvider):
     async def _query_lm_studio_v0_api(self) -> list[dict[str, Any]]:
         """
         Query LM Studio v0 REST API for model metadata including context length.
-        Returns a list of model info with context_length extracted.
+        Returns a list of model info with rich metadata.
         """
         # LM Studio v0 API endpoint
-        base_url = str(self._client.base_url)
-        # Remove '/v1/' and add '/api/v0/models'
-        v0_api_url = f"{base_url.replace('/v1/', '')}/api/v0/models"
+        import urllib.parse
+        base_url = str(self._client.base_url).rstrip('/')
+        parsed = urllib.parse.urlparse(base_url)
+
+        # Check if the path already ends with /api/v0 or /api/v0/
+        path = parsed.path
+        if path.endswith('/api/v0') or path.endswith('/api/v0/'):
+            # Already has the v0 API path, just add /models
+            v0_api_url = urllib.parse.urlunparse(parsed._replace(path=f"{path.rstrip('/')}/models"))
+        else:
+            # Add /api/v0/models to the path
+            v0_api_url = urllib.parse.urlunparse(parsed._replace(path=f"{path.rstrip('/')}/api/v0/models"))
         headers = {"Authorization": f"Bearer {self._client.api_key}"}
 
         try:
@@ -69,7 +78,15 @@ class CustomProvider(LLMProvider):
                 for model_data in data.get("data", []):
                     models.append({
                         "id": model_data.get("id"),
-                        "context_length": model_data.get("max_context_length")
+                        "object": model_data.get("object", "model"),
+                        "type": model_data.get("type", "unknown"),
+                        "publisher": model_data.get("publisher", "unknown"),
+                        "arch": model_data.get("arch", "unknown"),
+                        "state": model_data.get("state", "unknown"),
+                        "max_context_length": model_data.get("max_context_length"),
+                        "loaded_context_length": model_data.get("loaded_context_length"),
+                        "capabilities": model_data.get("capabilities", []),
+                        "loaded": model_data.get("loaded", False)
                     })
 
                 return models
