@@ -30,7 +30,7 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     failure_tracker: Any = None  # Optional FailureTracker instance
-    
+
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -41,7 +41,7 @@ class Session:
         }
         self.messages.append(msg)
         self.updated_at = datetime.now()
-    
+
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
         """Get recent messages in LLM format, preserving tool metadata."""
         out: list[dict[str, Any]] = []
@@ -52,7 +52,7 @@ class Session:
                     entry[k] = m[k]
             out.append(entry)
         return out
-    
+
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
         self.messages = []
@@ -73,7 +73,7 @@ class SessionManager:
         self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
         self._cache: dict[str, Session] = {}
         self.failure_tracker = failure_tracker
-    
+
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
         safe_key = safe_filename(key.replace(":", "_"))
@@ -83,7 +83,7 @@ class SessionManager:
         """Legacy global session path (~/.nanobot/sessions/)."""
         safe_key = safe_filename(key.replace(":", "_"))
         return self.legacy_sessions_dir / f"{safe_key}.jsonl"
-    
+
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
@@ -105,7 +105,7 @@ class SessionManager:
 
         self._cache[key] = session
         return session
-    
+
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
         path = self._get_session_path(key)
@@ -151,7 +151,7 @@ class SessionManager:
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
             return None
-    
+
     def save(self, session: Session) -> None:
         """Save a session to disk."""
         path = self._get_session_path(session.key)
@@ -171,11 +171,11 @@ class SessionManager:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
         self._cache[session.key] = session
-    
+
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
-    
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         List all sessions.
@@ -184,7 +184,7 @@ class SessionManager:
             List of session info dicts.
         """
         sessions = []
-        
+
         for path in self.sessions_dir.glob("*.jsonl"):
             try:
                 # Read just the metadata line
@@ -202,5 +202,5 @@ class SessionManager:
                             })
             except Exception:
                 continue
-        
+
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

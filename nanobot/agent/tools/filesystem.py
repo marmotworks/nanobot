@@ -28,11 +28,11 @@ class ReadFileTool(Tool):
     @property
     def name(self) -> str:
         return "read_file"
-    
+
     @property
     def description(self) -> str:
         return "Read the contents of a file at the given path."
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -45,7 +45,7 @@ class ReadFileTool(Tool):
             },
             "required": ["path"]
         }
-    
+
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -72,11 +72,11 @@ class WriteFileTool(Tool):
     @property
     def name(self) -> str:
         return "write_file"
-    
+
     @property
     def description(self) -> str:
         return "Write content to a file at the given path. Creates parent directories if needed."
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -93,7 +93,7 @@ class WriteFileTool(Tool):
             },
             "required": ["path", "content"]
         }
-    
+
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -116,11 +116,11 @@ class EditFileTool(Tool):
     @property
     def name(self) -> str:
         return "edit_file"
-    
+
     @property
     def description(self) -> str:
         return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -141,7 +141,7 @@ class EditFileTool(Tool):
             },
             "required": ["path", "old_text", "new_text"]
         }
-    
+
     async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir)
@@ -200,11 +200,11 @@ class ListDirTool(Tool):
     @property
     def name(self) -> str:
         return "list_dir"
-    
+
     @property
     def description(self) -> str:
         return "List the contents of a directory."
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
@@ -217,7 +217,7 @@ class ListDirTool(Tool):
             },
             "required": ["path"]
         }
-    
+
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             dir_path = _resolve_path(path, self._workspace, self._allowed_dir)

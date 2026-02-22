@@ -26,7 +26,7 @@ class ContextBuilder:
         self.skills = SkillsLoader(workspace)
         self.failure_tracker = failure_tracker
         self.context_tracker = None  # Will be set by AgentLoop
-    
+
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
@@ -38,20 +38,20 @@ class ContextBuilder:
             Complete system prompt.
         """
         parts = []
-        
+
         # Core identity
         parts.append(self._get_identity())
-        
+
         # Bootstrap files
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
-        
+
         # Memory context
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
-        
+
         # Skills - progressive loading
         # 1. Always-loaded skills: include full content
         always_skills = self.skills.get_always_skills()
@@ -59,7 +59,7 @@ class ContextBuilder:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
-        
+
         # 2. Available skills: only show summary (agent uses read_file to load)
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
@@ -83,7 +83,7 @@ Skills with available="false" need dependencies installed first - you can try in
                 parts.append(f"# Context Window Usage\n\n{context_info}")
 
         return "\n\n---\n\n".join(parts)
-    
+
     def _get_identity(self) -> str:
         """Get the core identity section."""
         from datetime import datetime
@@ -93,7 +93,7 @@ Skills with available="false" need dependencies installed first - you can try in
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        
+
         return f"""# nanobot 🐈
 
 You are nanobot, a helpful AI assistant. 
@@ -118,19 +118,19 @@ Always be helpful, accurate, and concise. Before calling tools, briefly tell the
 If you need to use tools, call them directly — never send a preliminary message like "Let me check" without actually calling a tool.
 When remembering something important, write to {workspace_path}/memory/MEMORY.md
 To recall past events, grep {workspace_path}/memory/HISTORY.md"""
-    
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
-        
+
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
-        
+
         return "\n\n".join(parts) if parts else ""
-    
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -175,7 +175,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         """Build user message content with optional base64-encoded images."""
         if not media:
             return text
-        
+
         images = []
         for path in media:
             p = Path(path)
@@ -184,11 +184,11 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
                 continue
             b64 = base64.b64encode(p.read_bytes()).decode()
             images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
-        
+
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
-    
+
     def add_tool_result(
         self,
         messages: list[dict[str, Any]],
@@ -215,7 +215,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
             "content": result
         })
         return messages
-    
+
     def add_assistant_message(
         self,
         messages: list[dict[str, Any]],

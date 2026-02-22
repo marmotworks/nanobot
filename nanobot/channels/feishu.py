@@ -70,7 +70,7 @@ def _extract_share_card_content(content_json: dict, msg_type: str) -> str:
 def _extract_interactive_content(content: dict) -> list[str]:
     """Recursively extract text and links from interactive card content."""
     parts = []
-    
+
     if isinstance(content, str):
         try:
             content = json.loads(content)
@@ -103,19 +103,19 @@ def _extract_interactive_content(content: dict) -> list[str]:
             header_text = header_title.get("content", "") or header_title.get("text", "")
             if header_text:
                 parts.append(f"title: {header_text}")
-    
+
     return parts
 
 
 def _extract_element_content(element: dict) -> list[str]:
     """Extract content from a single card element."""
     parts = []
-    
+
     if not isinstance(element, dict):
         return parts
-    
+
     tag = element.get("tag", "")
-    
+
     if tag in ("markdown", "lark_md"):
         content = element.get("content", "")
         if content:
@@ -176,7 +176,7 @@ def _extract_element_content(element: dict) -> list[str]:
     else:
         for ne in element.get("elements", []):
             parts.extend(_extract_element_content(ne))
-    
+
     return parts
 
 
@@ -210,20 +210,20 @@ def _extract_post_text(content_json: dict) -> str:
                     elif tag == "at":
                         text_parts.append(f"@{element.get('user_name', 'user')}")
         return " ".join(text_parts).strip() if text_parts else None
-    
+
     # Try direct format first
     if "content" in content_json:
         result = extract_from_lang(content_json)
         if result:
             return result
-    
+
     # Try localized format
     for lang_key in ("zh_cn", "en_us", "ja_jp"):
         lang_content = content_json.get(lang_key)
         result = extract_from_lang(lang_content)
         if result:
             return result
-    
+
     return ""
 
 
@@ -238,9 +238,9 @@ class FeishuChannel(BaseChannel):
     - Bot capability enabled
     - Event subscription enabled (im.message.receive_v1)
     """
-    
+
     name = "feishu"
-    
+
     def __init__(self, config: FeishuConfig, bus: MessageBus):
         super().__init__(config, bus)
         self.config: FeishuConfig = config
@@ -249,27 +249,27 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
-    
+
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
         if not FEISHU_AVAILABLE:
             logger.error("Feishu SDK not installed. Run: pip install lark-oapi")
             return
-        
+
         if not self.config.app_id or not self.config.app_secret:
             logger.error("Feishu app_id and app_secret not configured")
             return
-        
+
         self._running = True
         self._loop = asyncio.get_running_loop()
-        
+
         # Create Lark client for sending messages
         self._client = lark.Client.builder() \
             .app_id(self.config.app_id) \
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
-        
+
         # Create event handler (only register message receive, ignore other events)
         event_handler = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
@@ -277,7 +277,7 @@ class FeishuChannel(BaseChannel):
         ).register_p2_im_message_receive_v1(
             self._on_message_sync
         ).build()
-        
+
         # Create WebSocket client for long connection
         self._ws_client = lark.ws.Client(
             self.config.app_id,
@@ -285,7 +285,7 @@ class FeishuChannel(BaseChannel):
             event_handler=event_handler,
             log_level=lark.LogLevel.INFO
         )
-        
+
         # Start WebSocket client in a separate thread with reconnect loop
         def run_ws():
             while self._running:
@@ -295,17 +295,17 @@ class FeishuChannel(BaseChannel):
                     logger.warning("Feishu WebSocket error: {}", e)
                 if self._running:
                     import time; time.sleep(5)
-        
+
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
-        
+
         logger.info("Feishu bot started with WebSocket long connection")
         logger.info("No public IP required - using WebSocket to receive events")
-        
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
-    
+
     async def stop(self) -> None:
         """Stop the Feishu bot."""
         self._running = False
@@ -315,7 +315,7 @@ class FeishuChannel(BaseChannel):
             except Exception as e:
                 logger.warning("Error stopping WebSocket client: {}", e)
         logger.info("Feishu bot stopped")
-    
+
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
         try:
@@ -326,9 +326,9 @@ class FeishuChannel(BaseChannel):
                     .reaction_type(Emoji.builder().emoji_type(emoji_type).build())
                     .build()
                 ).build()
-            
+
             response = self._client.im.v1.message_reaction.create(request)
-            
+
             if not response.success():
                 logger.warning("Failed to add reaction: code={}, msg={}", response.code, response.msg)
             else:
@@ -344,10 +344,10 @@ class FeishuChannel(BaseChannel):
         """
         if not self._client or not Emoji:
             return
-        
+
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
-    
+
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
         r"((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)",
@@ -627,7 +627,7 @@ class FeishuChannel(BaseChannel):
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
-    
+
     def _on_message_sync(self, data: "P2ImMessageReceiveV1") -> None:
         """
         Sync handler for incoming messages (called from WebSocket thread).
@@ -635,7 +635,7 @@ class FeishuChannel(BaseChannel):
         """
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
-    
+
     async def _on_message(self, data: "P2ImMessageReceiveV1") -> None:
         """Handle incoming message from Feishu."""
         try:

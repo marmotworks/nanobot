@@ -1,0 +1,17 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      - id: ruff
+        args: [--exit-non-zero-on-fix]
+      - id: ruff-format
+        args: [--check]
+
+  - repo: local
+    hooks:
+      - id: pytest-check
+        name: pytest (non-integration)
+        entry: python3 -m pytest tests/ -x -q -k "not integration" --tb=short
+        language: system
+        pass_filenames: false
+        always_run: true

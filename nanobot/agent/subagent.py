@@ -29,7 +29,7 @@ class SubagentManager:
     to handle specific tasks. They can use a different provider/model than
     the main agent (e.g. a local LM Studio model for vision tasks).
     """
-    
+
     def __init__(
         self,
         provider: LLMProvider,
@@ -122,7 +122,7 @@ class SubagentManager:
 
         logger.info("SubagentManager: Using main provider for model='{}'", model)
         return self.provider
-    
+
     async def spawn(
         self,
         task: str,
@@ -211,7 +211,7 @@ class SubagentManager:
         result = f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
         logger.info("SubagentManager: Returning success message: {}", result[:100] + "..." if len(result) > 100 else result)
         return result
-    
+
     async def _run_subagent(
         self,
         task_id: str,
@@ -237,7 +237,7 @@ class SubagentManager:
         # Resolve the correct provider for this model
         subagent_provider = await self._get_provider_for_model(subagent_model)
         logger.info("Subagent [{}] using provider: {}", task_id, subagent_provider.__class__.__name__)
-        
+
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
@@ -253,7 +253,7 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
-            
+
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
 
@@ -275,15 +275,15 @@ class SubagentManager:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ]
-            
+
             # Run agent loop (limited iterations)
             max_iterations = 15
             iteration = 0
             final_result: str | None = None
-            
+
             while iteration < max_iterations:
                 iteration += 1
-                
+
                 response = await subagent_provider.chat(
                     messages=messages,
                     tools=tools.get_definitions(),
@@ -291,7 +291,7 @@ class SubagentManager:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 )
-                
+
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
                     tool_call_dicts = [
@@ -310,7 +310,7 @@ class SubagentManager:
                         "content": response.content or "",
                         "tool_calls": tool_call_dicts,
                     })
-                    
+
                     # Execute tools
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
@@ -325,18 +325,18 @@ class SubagentManager:
                 else:
                     final_result = response.content
                     break
-            
+
             if final_result is None:
                 final_result = "Task completed but no final response was generated."
-            
+
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
-            
+
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
-    
+
     async def _announce_result(
         self,
         task_id: str,
@@ -348,7 +348,7 @@ class SubagentManager:
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
-        
+
         announce_content = f"""[Subagent '{label}' {status_text}]
 
 Task: {task}
@@ -357,7 +357,7 @@ Result:
 {result}
 
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
-        
+
         # Inject as system message to trigger main agent
         msg = InboundMessage(
             channel="system",
@@ -365,10 +365,10 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
         )
-        
+
         await self.bus.publish_inbound(msg)
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
-    
+
     def _build_subagent_prompt(self, task: str) -> str:
         """Build a focused system prompt for the subagent."""
         from datetime import datetime
@@ -405,7 +405,7 @@ Your workspace is at: {self.workspace}
 Skills are available at: {self.workspace}/skills/ (read SKILL.md files as needed)
 
 When you have completed the task, provide a clear summary of your findings or actions."""
-    
+
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)

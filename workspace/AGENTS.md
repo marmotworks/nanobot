@@ -28,6 +28,103 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 - Follow existing naming conventions and code style.
 - Improve consistency wherever possible.
 
+## Code Style
+
+The project uses **Ruff** for linting and formatting. All code must pass `ruff check` and `ruff format --check` before committing. Write compliant code from the start — do not rely on autofix.
+
+### Rules Enforced
+
+| Rule Set | Code | What it checks |
+|----------|------|----------------|
+| pycodestyle | E, W | Spacing, indentation, blank lines |
+| pyflakes | F | Undefined names, unused imports |
+| isort | I | Import order and grouping |
+| pep8-naming | N | Class, function, variable naming |
+| pyupgrade | UP | Modern Python syntax (f-strings, etc.) |
+| bugbear | B | Common bugs and design issues |
+| comprehensions | C4 | Use list/dict/set comprehensions correctly |
+| simplify | SIM | Simplify boolean expressions, conditionals |
+| type-checking | TCH | Move type-only imports into TYPE_CHECKING blocks |
+| ruff-specific | RUF | Ruff's own opinionated rules |
+
+### Key Style Rules (memorize these)
+
+- **Line length**: 100 characters max
+- **Quotes**: double quotes (`"`) everywhere — never single quotes in production code
+- **Imports**: stdlib → third-party → first-party (`nanobot`), each group separated by a blank line
+- **Type annotations**: always annotate function signatures; use `from __future__ import annotations` for forward refs
+- **No unused imports**: remove them — ruff will flag every one
+- **f-strings over `.format()`**: use f-strings for string interpolation (UP rule)
+- **No mutable default arguments**: use `None` + body assignment instead (B006)
+- **Comprehensions over map/filter**: prefer `[x for x in ...]` over `list(map(...))` (C4)
+- **Early returns**: avoid deeply nested `if` blocks — return early (SIM)
+
+### Import Order Template
+
+```python
+from __future__ import annotations  # if needed
+
+# stdlib
+import asyncio
+import os
+from typing import Any
+
+# third-party
+from loguru import logger
+from pydantic import BaseModel
+
+# first-party
+from nanobot.agent.context import ContextBuilder
+from nanobot.providers.base import BaseProvider
+```
+
+### What Ruff Will Reject (common subagent mistakes)
+
+```python
+# ❌ Single quotes
+msg = 'hello world'
+
+# ✅ Double quotes
+msg = "hello world"
+
+# ❌ Unsorted / ungrouped imports
+import os
+from nanobot.agent import loop
+import asyncio
+
+# ✅ Sorted and grouped
+import asyncio
+import os
+
+from nanobot.agent import loop
+
+# ❌ Unused import
+from typing import Optional  # never used
+
+# ❌ Old-style union type (UP007)
+def foo(x: Optional[str]) -> None: ...
+
+# ✅ Modern union type
+def foo(x: str | None) -> None: ...
+
+# ❌ map() when comprehension is cleaner
+names = list(map(lambda x: x.name, models))
+
+# ✅ Comprehension
+names = [x.name for x in models]
+```
+
+### Before Submitting Code
+
+Always run this and fix all violations before reporting done:
+```bash
+cd /Users/mhall/Workspaces/nanobot
+python3 -m ruff check nanobot/ tests/ --statistics
+python3 -m ruff format --check nanobot/ tests/
+```
+
+If violations exist, fix them manually (line by line) — do NOT run `ruff --fix`.
+
 ## Nanobot Core Code Changes
 
 Whenever modifying files under `nanobot/` (not skills):
