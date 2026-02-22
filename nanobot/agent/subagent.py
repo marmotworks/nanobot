@@ -8,6 +8,7 @@ import uuid
 
 from loguru import logger
 
+from nanobot.agent.registry import SubagentRegistry
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -42,8 +43,10 @@ class SubagentManager:
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
         config: "Config | None" = None,
+        db_path: Path | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
+
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
@@ -55,6 +58,10 @@ class SubagentManager:
         self.restrict_to_workspace = restrict_to_workspace
         self._config = config  # Full config for resolving per-model providers
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        db_path = db_path or Path.home() / ".nanobot" / "workspace" / "subagents.db"
+        self.registry = SubagentRegistry(db_path)
+        self.registry.open()
+        self.registry.recover_on_startup()
 
     async def _get_provider_for_model(self, model: str) -> LLMProvider:
         """
@@ -65,7 +72,9 @@ class SubagentManager:
         provider matching via config, and finally to the main agent's provider.
         """
         if self._config is None:
-            logger.info("SubagentManager: No config available, using main provider for model '{}'", model)
+            logger.info(
+                "SubagentManager: No config available, using main provider for model '{}'", model
+            )
             return self.provider
 
         # --- 1. Check custom (local) provider first --------------------------
@@ -75,6 +84,7 @@ class SubagentManager:
         custom_cfg = getattr(self._config.providers, "custom", None)
         if custom_cfg and custom_cfg.api_base:
             from nanobot.providers.custom_provider import CustomProvider
+
             probe = CustomProvider(
                 api_key=custom_cfg.api_key or "lm-studio",
                 api_base=custom_cfg.api_base,
@@ -89,29 +99,46 @@ class SubagentManager:
 
             logger.info("SubagentManager: Custom provider local models: {}", local_models)
             if model in local_models:
-                logger.info("SubagentManager: Model '{}' found in custom provider — using CustomProvider", model)
+                logger.info(
+                    "SubagentManager: Model '{}' found in custom provider — using CustomProvider",
+                    model,
+                )
                 return probe
 
         # --- 2. Keyword-based provider matching ------------------------------
         provider_name = self._config.get_provider_name(model)
-        logger.info("SubagentManager: Keyword-matched provider_name='{}' for model='{}'", provider_name, model)
+        logger.info(
+            "SubagentManager: Keyword-matched provider_name='{}' for model='{}'",
+            provider_name,
+            model,
+        )
 
         if provider_name == "custom":
             # Shouldn't normally reach here given step 1, but handle it anyway
             from nanobot.providers.custom_provider import CustomProvider
+
             p = self._config.get_provider(model)
             api_key = p.api_key if p else "lm-studio"
             api_base = self._config.get_api_base(model) or "http://localhost:8000/v1"
-            logger.info("SubagentManager: Creating CustomProvider(api_base='{}') for model='{}'", api_base, model)
+            logger.info(
+                "SubagentManager: Creating CustomProvider(api_base='{}') for model='{}'",
+                api_base,
+                model,
+            )
             return CustomProvider(api_key=api_key, api_base=api_base, default_model=model)
 
         if provider_name and provider_name != self._config.get_provider_name(self.model):
             # Different provider than the main agent — build it from config
             from nanobot.providers.litellm_provider import LiteLLMProvider
+
             p = self._config.get_provider(model)
             if p and p.api_key:
                 api_base = self._config.get_api_base(model)
-                logger.info("SubagentManager: Creating LiteLLMProvider for model='{}' via provider='{}'", model, provider_name)
+                logger.info(
+                    "SubagentManager: Creating LiteLLMProvider for model='{}' via provider='{}'",
+                    model,
+                    provider_name,
+                )
                 return LiteLLMProvider(
                     api_key=p.api_key,
                     api_base=api_base,
@@ -146,10 +173,12 @@ class SubagentManager:
         Returns:
             Status message indicating the subagent was started.
         """
-        logger.info("SubagentManager.spawn() called with task='{}', label='{}', model='{}'",
-                    task[:50] + "..." if len(task) > 50 else task,
-                    label or "None",
-                    model or "None")
+        logger.info(
+            "SubagentManager.spawn() called with task='{}', label='{}', model='{}'",
+            task[:50] + "..." if len(task) > 50 else task,
+            label or "None",
+            model or "None",
+        )
 
         # Validate model if specified
         if model:
@@ -158,8 +187,11 @@ class SubagentManager:
             # Resolve the correct provider for this model FIRST, then validate against it
             candidate_provider = await self._get_provider_for_model(model)
             provider_class_name = candidate_provider.__class__.__name__
-            logger.info("SubagentManager: Resolved provider '{}' (api_base='{}') for model validation",
-                        provider_class_name, candidate_provider.api_base)
+            logger.info(
+                "SubagentManager: Resolved provider '{}' (api_base='{}') for model validation",
+                provider_class_name,
+                candidate_provider.api_base,
+            )
 
             try:
                 available_models = await list_models(
@@ -175,22 +207,41 @@ class SubagentManager:
             # Handle None or empty list from list_models
             if available_models is None:
                 available_models = []
-                logger.warning("SubagentManager: list_models returned None, defaulting to empty list")
+                logger.warning(
+                    "SubagentManager: list_models returned None, defaulting to empty list"
+                )
 
-            logger.info("SubagentManager: Available models from '{}': {}", provider_class_name, available_models)
+            logger.info(
+                "SubagentManager: Available models from '{}': {}",
+                provider_class_name,
+                available_models,
+            )
 
             if available_models and model not in available_models:
-                error_msg = f"Error: Model '{model}' is not available from the provider. " \
-                           f"Available models: {', '.join(available_models)}"
+                error_msg = (
+                    f"Error: Model '{model}' is not available from the provider. "
+                    f"Available models: {', '.join(available_models)}"
+                )
                 logger.error("SubagentManager: Model validation failed: {}", error_msg)
                 return error_msg
 
             logger.info("SubagentManager: Model '{}' validated successfully", model)
         else:
-            logger.info("SubagentManager: No model specified, will use default model: '{}'", self.model)
+            logger.info(
+                "SubagentManager: No model specified, will use default model: '{}'", self.model
+            )
 
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+
+        # Capacity enforcement
+        count = self.registry.get_running_count()
+        if count >= 3:
+            raise RuntimeError(f"Subagent capacity limit reached ({count}/3 running)")
+
+        # Register the task in the registry
+        origin_str = "user"
+        self.registry.tag_in(task_id, display_label, origin_str)
 
         logger.info("SubagentManager: Creating background task with task_id='{}'", task_id)
         origin = {
@@ -209,7 +260,10 @@ class SubagentManager:
 
         logger.info("SubagentManager: Spawned subagent [{}]: {}", task_id, display_label)
         result = f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
-        logger.info("SubagentManager: Returning success message: {}", result[:100] + "..." if len(result) > 100 else result)
+        logger.info(
+            "SubagentManager: Returning success message: {}",
+            result[:100] + "..." if len(result) > 100 else result,
+        )
         return result
 
     async def _run_subagent(
@@ -236,7 +290,9 @@ class SubagentManager:
 
         # Resolve the correct provider for this model
         subagent_provider = await self._get_provider_for_model(subagent_model)
-        logger.info("Subagent [{}] using provider: {}", task_id, subagent_provider.__class__.__name__)
+        logger.info(
+            "Subagent [{}] using provider: {}", task_id, subagent_provider.__class__.__name__
+        )
 
         try:
             # Build subagent tools (no message tool, no spawn tool)
@@ -246,11 +302,13 @@ class SubagentManager:
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-            ))
+            tools.register(
+                ExecTool(
+                    working_dir=str(self.workspace),
+                    timeout=self.exec_config.timeout,
+                    restrict_to_workspace=self.restrict_to_workspace,
+                )
+            )
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
 
@@ -261,14 +319,23 @@ class SubagentManager:
             if image_path:
                 import base64
                 import mimetypes
+
                 mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
                 with open(image_path, "rb") as f:
                     image_b64 = base64.b64encode(f.read()).decode()
                 user_content: Any = [
                     {"type": "text", "text": task},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{image_b64}"},
+                    },
                 ]
-                logger.info("Subagent [{}] embedding image '{}' ({}) as base64 in user message", task_id, image_path, mime_type)
+                logger.info(
+                    "Subagent [{}] embedding image '{}' ({}) as base64 in user message",
+                    task_id,
+                    image_path,
+                    mime_type,
+                )
             else:
                 user_content = task
 
@@ -306,23 +373,32 @@ class SubagentManager:
                         }
                         for tc in response.tool_calls
                     ]
-                    messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": tool_call_dicts,
-                    })
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": response.content or "",
+                            "tool_calls": tool_call_dicts,
+                        }
+                    )
 
                     # Execute tools
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                        logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
+                        logger.debug(
+                            "Subagent [{}] executing: {} with arguments: {}",
+                            task_id,
+                            tool_call.name,
+                            args_str,
+                        )
                         result = await tools.execute(tool_call.name, tool_call.arguments)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_call.name,
-                            "content": result,
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "name": tool_call.name,
+                                "content": result,
+                            }
+                        )
                 else:
                     final_result = response.content
                     break
@@ -368,12 +444,15 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         )
 
         await self.bus.publish_inbound(msg)
-        logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
+        logger.debug(
+            "Subagent [{}] announced result to {}:{}", task_id, origin["channel"], origin["chat_id"]
+        )
 
     def _build_subagent_prompt(self, task: str) -> str:
         """Build a focused system prompt for the subagent."""
         from datetime import datetime
         import time as _time
+
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
 

@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+
+
+class FakeTextContent:
+    """Fake TextContent class for testing isinstance checks."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
 
 
 class TestMCPToolWrapperProperties:
@@ -104,18 +111,13 @@ class TestMCPToolWrapperExecute:
 
         # Create a mock types module with TextContent class
         mock_types = MagicMock()
-        mock_types.TextContent = MagicMock
+        mock_types.TextContent = FakeTextContent
 
         mock_result = MagicMock()
-        mock_result.content = [
-            MagicMock(text="First result", spec=["text", "type"]),
-            MagicMock(text="Second result", spec=["text", "type"]),
-        ]
+        mock_result.content = [FakeTextContent("First result"), FakeTextContent("Second result")]
         mock_session.call_tool.return_value = mock_result
 
-        from nanobot.agent.tools import mcp
-
-        with patch.object(mcp, "types", mock_types):
+        with patch("mcp.types", mock_types):
             from nanobot.agent.tools.mcp import MCPToolWrapper
 
             wrapper = MCPToolWrapper(mock_session, "my_server", mock_tool_def)
@@ -138,9 +140,7 @@ class TestMCPToolWrapperExecute:
         mock_result.content = []
         mock_session.call_tool.return_value = mock_result
 
-        from nanobot.agent.tools import mcp
-
-        with patch.object(mcp, "types", MagicMock()):
+        with patch("mcp.types", MagicMock()):
             from nanobot.agent.tools.mcp import MCPToolWrapper
 
             wrapper = MCPToolWrapper(mock_session, "my_server", mock_tool_def)
@@ -157,24 +157,19 @@ class TestMCPToolWrapperExecute:
 
         # Create a mock types module with TextContent class
         mock_types = MagicMock()
-        mock_types.TextContent = MagicMock
+        mock_types.TextContent = FakeTextContent
 
         mock_result = MagicMock()
-        mock_result.content = [
-            MagicMock(text="Text block", spec=["text", "type"]),
-            MagicMock(),  # Non-text block
-        ]
+        mock_result.content = [FakeTextContent("Text block"), "plain string"]
         mock_session.call_tool.return_value = mock_result
 
-        from nanobot.agent.tools import mcp
-
-        with patch.object(mcp, "types", mock_types):
+        with patch("mcp.types", mock_types):
             from nanobot.agent.tools.mcp import MCPToolWrapper
 
             wrapper = MCPToolWrapper(mock_session, "my_server", mock_tool_def)
             result = await wrapper.execute()
 
-            assert result == "Text block\n<MagicMock object>"
+            assert result == "Text block\nplain string"
 
     @pytest.mark.asyncio
     async def test_passes_kwargs_through_to_session_call_tool_correctly(self) -> None:
@@ -185,15 +180,13 @@ class TestMCPToolWrapperExecute:
 
         # Create a mock types module with TextContent class
         mock_types = MagicMock()
-        mock_types.TextContent = MagicMock
+        mock_types.TextContent = FakeTextContent
 
         mock_result = MagicMock()
-        mock_result.content = [MagicMock(text="result", spec=["text", "type"])]
+        mock_result.content = [FakeTextContent("result")]
         mock_session.call_tool.return_value = mock_result
 
-        from nanobot.agent.tools import mcp
-
-        with patch.object(mcp, "types", mock_types):
+        with patch("mcp.types", mock_types):
             from nanobot.agent.tools.mcp import MCPToolWrapper
 
             wrapper = MCPToolWrapper(mock_session, "my_server", mock_tool_def)
@@ -245,28 +238,26 @@ class TestConnectMcpServers:
         mock_registry = MagicMock()
         mock_stack = MagicMock()
 
-        call_count = 0
+        mock_read = AsyncMock()
+        mock_write = AsyncMock()
+        mock_session_instance = AsyncMock()
+        mock_session_instance.initialize = AsyncMock()
+        mock_session_instance.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
 
-        def mock_enter_async_context(context):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return AsyncMock(), AsyncMock()
-            else:
-                raise ConnectionError("Failed to connect")
+        mock_stack.enter_async_context = AsyncMock(
+            side_effect=[
+                (mock_read, mock_write),  # server1 call 1: stdio_client → (read, write)
+                mock_session_instance,  # server1 call 2: ClientSession → session
+                ConnectionError("Failed to connect"),  # server2 call 1: stdio_client → raises
+            ],
+        )
 
-        mock_stack.enter_async_context = mock_enter_async_context
-
-        with patch("nanobot.agent.tools.mcp.logger") as mock_logger, \
-             patch("mcp.ClientSession") as mock_session_cls, \
-             patch("mcp.StdioServerParameters"), \
-             patch("mcp.client.stdio.stdio_client") as mock_stdio_client:
-
-            mock_session_instance = MagicMock()
-            mock_session_instance.initialize = AsyncMock()
-            mock_session_instance.list_tools = AsyncMock(
-                return_value=MagicMock(tools=[]),
-            )
+        with (
+            patch("nanobot.agent.tools.mcp.logger") as mock_logger,
+            patch("mcp.ClientSession") as mock_session_cls,
+            patch("mcp.StdioServerParameters"),
+            patch("mcp.client.stdio.stdio_client") as mock_stdio_client,
+        ):
             mock_session_cls.return_value = mock_session_instance
             mock_stdio_client.return_value = AsyncMock()
 
@@ -277,7 +268,7 @@ class TestConnectMcpServers:
             mock_logger.error.assert_called_once_with(
                 "MCP server '{}': failed to connect: {}",
                 "server2",
-                ConnectionError("Failed to connect"),
+                ANY,
             )
             # First server should still have been processed
             assert mock_logger.info.call_count >= 1

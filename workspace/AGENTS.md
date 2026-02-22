@@ -170,13 +170,20 @@ The backlog lives at `~/.nanobot/workspace/memory/BACKLOG.md`. A cron job fires 
 Spawn a **planning subagent** (`qwen3-coder-next`) with:
 - The task description
 - Paths to relevant files to read
-- Instruction to **research first**: run web searches to find current documentation, best practices, and known issues before proposing any approach. Cite sources in the milestone notes.
+- Instruction to **research first**: use built-in knowledge to form hypotheses, then **verify every assumption** by fetching real URLs (README, docs, changelogs, PyPI, npm). Do not guess. If a fact cannot be confirmed from a real source, say so explicitly.
 - Instruction to produce a milestone list where **each milestone**:
   - Touches exactly one file OR installs/verifies exactly one thing
   - Has a single measurable pass/fail criterion (a command to run + expected output)
   - Fits comfortably within ~8k tokens of context
   - Is independent or has explicit dependencies listed
-  - Includes a note on the approach chosen and why (based on research)
+  - Includes a note on the approach chosen and **the source URL that confirms it**
+
+**Research quality standard for planning subagents:**
+- Use built-in knowledge to know *where* to look and *what questions to ask*
+- Use real fetched content (README, docs, source code, PyPI) to answer those questions
+- Every milestone note must cite a real URL — not a guess, not a paraphrase of prior knowledge
+- If a URL returns no useful content, try an alternative (GitHub raw, PyPI, web search)
+- Explicitly flag anything that could not be verified from a real source
 
 The planning subagent writes the milestone list back into `BACKLOG.md` under the task. If a proposed milestone is still too large (e.g. "fix 10 files"), it must be split further before execution begins.
 
