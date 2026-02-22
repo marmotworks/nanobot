@@ -1,16 +1,14 @@
 """QQ channel implementation using botpy SDK."""
 
+# ruff: noqa: I001
+from __future__ import annotations
+
 import asyncio
 import contextlib
 from collections import deque
 from typing import TYPE_CHECKING
 
 from loguru import logger
-
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import QQConfig
 
 try:
     import botpy
@@ -22,11 +20,17 @@ except ImportError:
     botpy = None
     C2CMessage = None
 
+from nanobot.channels.base import BaseChannel
+
 if TYPE_CHECKING:
     from botpy.message import C2CMessage
 
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import QQConfig
 
-def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
+
+def _make_bot_class(channel: QQChannel) -> type[botpy.Client]:
     """Create a botpy Client subclass bound to the given channel."""
     intents = botpy.Intents(public_messages=True, direct_message=True)
 
@@ -37,7 +41,7 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
         async def on_ready(self):
             logger.info("QQ bot ready: {}", self.robot.name)
 
-        async def on_c2c_message_create(self, message: "C2CMessage"):
+        async def on_c2c_message_create(self, message: C2CMessage):
             await channel._on_message(message)
 
         async def on_direct_message_create(self, message):
@@ -91,10 +95,8 @@ class QQChannel(BaseChannel):
         self._running = False
         if self._bot_task:
             self._bot_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._bot_task
-            except asyncio.CancelledError:
-                pass
         logger.info("QQ bot stopped")
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -111,7 +113,7 @@ class QQChannel(BaseChannel):
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
 
-    async def _on_message(self, data: "C2CMessage") -> None:
+    async def _on_message(self, data: C2CMessage) -> None:
         """Handle incoming message from QQ."""
         try:
             # Dedup by message ID

@@ -26,8 +26,8 @@ class CustomProvider(LLMProvider):
             kwargs.update(tools=tools, tool_choice="auto")
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
-        except Exception as e:
-            return LLMResponse(content=f"Error: {e}", finish_reason="error")
+        except Exception:
+            return LLMResponse(content="Error", finish_reason="error")
 
     def _parse(self, response: Any) -> LLMResponse:
         choice = response.choices[0]
@@ -89,8 +89,8 @@ class CustomProvider(LLMProvider):
         except httpx.HTTPError as e:
             print(f"Warning: Failed to query LM Studio v0 API: {e}")
             return []
-        except Exception as e:
-            print(f"Warning: Unexpected error querying LM Studio v0 API: {e}")
+        except Exception:
+            print("Warning: Unexpected error querying LM Studio v0 API")
             return []
 
     async def get_models(self) -> list[dict[str, Any]]:
@@ -115,7 +115,7 @@ class CustomProvider(LLMProvider):
                 }
                 for model in models.data
             ]
-        except Exception as e:
+        except Exception:
             # If listing fails, return default model info
             return [
                 {

@@ -1,11 +1,12 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import contextlib
 import os
-from pathlib import Path
 import select
 import signal
 import sys
+from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -726,7 +727,7 @@ def _get_bridge_dir() -> Path:
         console.print(f"[red]Build failed: {e}[/red]")
         if e.stderr:
             console.print(f"[dim]{e.stderr.decode()[:500]}[/dim]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     return user_bridge
 
@@ -1057,10 +1058,8 @@ def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
         token = None
-        try:
+        with contextlib.suppress(Exception):
             token = get_token()
-        except Exception:
-            pass
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(
@@ -1071,9 +1070,9 @@ def _login_openai_codex() -> None:
             console.print("[red]✗ Authentication failed[/red]")
             raise typer.Exit(1)
         console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
-    except ImportError:
+    except ImportError as e:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @_register_login("github_copilot")
@@ -1091,7 +1090,7 @@ def _login_github_copilot() -> None:
         console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":

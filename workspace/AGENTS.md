@@ -8,6 +8,7 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 - Ask for clarification when the request is ambiguous
 - Use tools to help accomplish tasks
 - Remember important information in memory/MEMORY.md; past events are logged in memory/HISTORY.md
+- **When a bug or problem is identified, add it to the backlog rather than attempting an on-the-spot workaround.** Workarounds accumulate technical debt and are harder to track. Log it, describe the symptom and suspected cause, and let the backlog system handle it methodically.
 
 ## Capability Development Philosophy
 
@@ -159,3 +160,61 @@ Every subagent task must be sized to fit well within the model's context window 
 - **Break down before dispatching** — if a task has more than ~5 logical changes or touches more than one file, split it into multiple subagent tasks and dispatch them sequentially or in parallel as dependencies allow.
 - **Progressive decomposition** — for large features, start with a planning subagent that reads the relevant files and produces a milestone breakdown. Then dispatch one subagent per milestone.
 - **Context budget** — assume each subagent has ~32k tokens of usable context. A task brief + one file + verification commands should comfortably fit. If you need to include multiple files, keep them short or include only the relevant sections.
+
+## Backlog Management (Two-Phase Dispatch)
+
+The backlog lives at `~/.nanobot/workspace/memory/BACKLOG.md`. A cron job fires every 15 minutes to advance work when capacity is idle. The cron handler follows a strict two-phase pattern:
+
+### Phase 1: Planning (when a task has no milestones yet)
+
+Spawn a **planning subagent** (`qwen3-coder-next`) with:
+- The task description
+- Paths to relevant files to read
+- Instruction to **research first**: run web searches to find current documentation, best practices, and known issues before proposing any approach. Cite sources in the milestone notes.
+- Instruction to produce a milestone list where **each milestone**:
+  - Touches exactly one file OR installs/verifies exactly one thing
+  - Has a single measurable pass/fail criterion (a command to run + expected output)
+  - Fits comfortably within ~8k tokens of context
+  - Is independent or has explicit dependencies listed
+  - Includes a note on the approach chosen and why (based on research)
+
+The planning subagent writes the milestone list back into `BACKLOG.md` under the task. If a proposed milestone is still too large (e.g. "fix 10 files"), it must be split further before execution begins.
+
+**Knowledge persistence**: Once MCP Local RAG is operational, research findings must be stored in the doc store so future tasks can reference them without re-researching. Until then, cite sources inline in BACKLOG.md milestone notes.
+
+### Phase 2: Execution (when milestones exist and one is ready)
+
+Spawn an **execution subagent** (`qwen3-coder-next`) with:
+- Exactly the milestone description
+- The single file to read (or install command)
+- The exact verification command and expected output
+
+The execution subagent reports pass/fail. The main agent **independently verifies** by running the criterion command itself — never trusts a self-report alone.
+
+### Cron Handler Logic
+
+When the cron fires:
+1. Read `BACKLOG.md`
+2. Skip tasks marked `Blocked` or `Complete`
+3. Find the first task with status `Not started` and no milestones → spawn **planning subagent**
+4. Find the first task with milestones and the next unchecked milestone with no blocker → spawn **execution subagent**
+5. If a milestone is `In progress` → check if the subagent has reported back; verify and mark done or retry
+6. Dispatch at most 2 background subagents at a time (reserve capacity for user requests)
+
+### BACKLOG.md Milestone Format
+
+Each milestone must be written in this format:
+```
+- [ ] N.M Short description
+      Criterion: `<command>` → `<expected output>`
+      File: `<single file path>` (or "N/A" for installs)
+      Blocker: N.X (or "none")
+```
+
+Example:
+```
+- [ ] 6.2 Implement BedrockProvider class
+      Criterion: `python3 -c "from nanobot.providers.bedrock_provider import BedrockProvider; print('OK')"` → `OK`
+      File: `nanobot/providers/bedrock_provider.py`
+      Blocker: 6.1
+```

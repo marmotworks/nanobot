@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
 import hashlib
 import json
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 import httpx
 from loguru import logger
@@ -104,12 +106,13 @@ async def _request_codex(
     body: dict[str, Any],
     verify: bool,
 ) -> tuple[str, list[ToolCallRequest], str]:
-    async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:
-        async with client.stream("POST", url, headers=headers, json=body) as response:
-            if response.status_code != 200:
-                text = await response.aread()
-                raise RuntimeError(_friendly_error(response.status_code, text.decode("utf-8", "ignore")))
-            return await _consume_sse(response)
+    async with httpx.AsyncClient(timeout=60.0, verify=verify) as client, client.stream(
+        "POST", url, headers=headers, json=body
+    ) as response:
+        if response.status_code != 200:
+            text = await response.aread()
+            raise RuntimeError(_friendly_error(response.status_code, text.decode("utf-8", "ignore")))
+        return await _consume_sse(response)
 
 
 def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -228,7 +231,7 @@ async def _iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], 
     async for line in response.aiter_lines():
         if line == "":
             if buffer:
-                data_lines = [l[5:].strip() for l in buffer if l.startswith("data:")]
+                data_lines = [ln[5:].strip() for ln in buffer if ln.startswith("data:")]
                 buffer = []
                 if not data_lines:
                     continue

@@ -302,16 +302,14 @@ class Config(BaseSettings):
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or p.api_key:
-                    return p, spec.name
+            if p and model_prefix and normalized_prefix == spec.name and (spec.is_oauth or p.api_key):
+                return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or p.api_key:
-                    return p, spec.name
+            if p and any(_kw_matches(kw) for kw in spec.keywords) and (spec.is_oauth or p.api_key):
+                return p, spec.name
 
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection

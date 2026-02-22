@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import re
+from typing import TYPE_CHECKING, ClassVar
 
 from loguru import logger
+
 from telegram import BotCommand, ReplyParameters, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.channels.base import BaseChannel
+
+if TYPE_CHECKING:
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import TelegramConfig
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -106,7 +113,7 @@ class TelegramChannel(BaseChannel):
     name = "telegram"
 
     # Commands registered with Telegram's command menu
-    BOT_COMMANDS = [
+    BOT_COMMANDS: ClassVar[list[BotCommand]] = [
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("help", "Show available commands"),
