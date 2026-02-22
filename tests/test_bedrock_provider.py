@@ -122,3 +122,57 @@ class TestBedrockProvider:
             assert "toolResult" in bedrock_messages[0]["content"][0]
             assert bedrock_messages[0]["content"][0]["toolResult"]["toolUseId"] == "t1"
             assert system_prompts == []
+
+    @pytest.mark.asyncio
+    async def test_tool_call_args_as_string(self):
+        """toolUse.input must always be a dict, even if arguments arrive as a JSON string."""
+        with patch("boto3.client"):
+            provider = BedrockProvider(default_model="us.anthropic.claude-sonnet-4-6")
+
+            messages = [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "t1",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": '{"city": "Austin"}',  # string, not dict
+                            },
+                        }
+                    ],
+                }
+            ]
+            converted, _ = provider._convert_messages(messages)
+            tool_use = converted[0]["content"][0]["toolUse"]
+            assert isinstance(tool_use["input"], dict), "toolUse.input must be a dict"
+            assert tool_use["input"] == {"city": "Austin"}
+
+    @pytest.mark.asyncio
+    async def test_tool_call_args_as_dict(self):
+        """Test that tool call arguments as a dict still work correctly."""
+        with patch("boto3.client"):
+            provider = BedrockProvider(default_model="us.anthropic.claude-sonnet-4-6")
+
+            messages = [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "t1",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": {"city": "Austin"},  # already a dict
+                            },
+                        }
+                    ],
+                }
+            ]
+            converted, _ = provider._convert_messages(messages)
+            tool_use = converted[0]["content"][0]["toolUse"]
+            assert isinstance(tool_use["input"], dict), "toolUse.input must be a dict"
+            assert tool_use["input"] == {"city": "Austin"}

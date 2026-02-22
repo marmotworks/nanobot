@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING, Any
 
 import boto3
@@ -54,18 +55,21 @@ class BedrockProvider(LLMProvider):
                     "content": [{
                         "toolResult": {
                             "toolUseId": tool_call_id,
-                            "content": [{"text": content}],
+                            "content": [{"text": str(content)}],
                         },
                     }],
                 })
             elif role == "assistant" and "tool_calls" in msg:
                 tool_uses = []
                 for tc in msg.get("tool_calls", []):
+                    args = tc.get("function", {}).get("arguments", {})
+                    # Ensure input is always a dict (Bedrock requires json object, not string)
+                    input_obj = json.loads(args) if isinstance(args, str) else args
                     tool_uses.append({
                         "toolUse": {
                             "toolUseId": tc.get("id", ""),
                             "name": tc.get("function", {}).get("name", ""),
-                            "input": tc.get("function", {}).get("arguments", {}),
+                            "input": input_obj,
                         },
                     })
                 bedrock_messages.append({
