@@ -3,17 +3,20 @@
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.failure_tracker import FailureTracker
 
 
 class ToolRegistry:
     """
     Registry for agent tools.
-    
+
     Allows dynamic registration and execution of tools.
+    Tracks failures to prevent repeated attempts.
     """
-    
-    def __init__(self):
+
+    def __init__(self, failure_tracker: FailureTracker | None = None):
         self._tools: dict[str, Tool] = {}
+        self.failure_tracker = failure_tracker
     
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -38,28 +41,38 @@ class ToolRegistry:
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """
         Execute a tool by name with given parameters.
-        
+
         Args:
             name: Tool name.
             params: Tool parameters.
-        
+
         Returns:
             Tool execution result as string.
-        
+
         Raises:
             KeyError: If tool not found.
         """
         tool = self._tools.get(name)
         if not tool:
-            return f"Error: Tool '{name}' not found"
+            error_msg = f"Error: Tool '{name}' not found"
+            if self.failure_tracker:
+                self.failure_tracker.record_failure(name, error_msg)
+            return error_msg
 
         try:
             errors = tool.validate_params(params)
             if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
-            return await tool.execute(**params)
+                error_msg = f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+                if self.failure_tracker:
+                    self.failure_tracker.record_failure(name, error_msg)
+                return error_msg
+            result = await tool.execute(**params)
+            return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}"
+            error_msg = f"Error executing {name}: {str(e)}"
+            if self.failure_tracker:
+                self.failure_tracker.record_failure(name, error_msg)
+            return error_msg
     
     @property
     def tool_names(self) -> list[str]:

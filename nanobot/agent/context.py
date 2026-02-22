@@ -13,17 +13,18 @@ from nanobot.agent.skills import SkillsLoader
 class ContextBuilder:
     """
     Builds the context (system prompt + messages) for the agent.
-    
+
     Assembles bootstrap files, memory, skills, and conversation history
     into a coherent prompt for the LLM.
     """
-    
+
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
-    
-    def __init__(self, workspace: Path):
+
+    def __init__(self, workspace: Path, failure_tracker: Any = None):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self.failure_tracker = failure_tracker
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
@@ -67,7 +68,13 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
-        
+
+        # Failure summary
+        if self.failure_tracker:
+            failure_summary = self.failure_tracker.get_failure_summary()
+            if failure_summary:
+                parts.append(failure_summary)
+
         return "\n\n---\n\n".join(parts)
     
     def _get_identity(self) -> str:

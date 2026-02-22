@@ -12,6 +12,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.providers.registry import list_models
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
@@ -56,19 +57,41 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
+        model: str | None = None,
     ) -> str:
         """
         Spawn a subagent to execute a task in the background.
-        
+
         Args:
             task: The task description for the subagent.
             label: Optional human-readable label for the task.
             origin_channel: The channel to announce results to.
             origin_chat_id: The chat ID to announce results to.
-        
+            model: Optional model to use for this subagent. If not specified,
+                   uses the model configured in __init__.
+
         Returns:
             Status message indicating the subagent was started.
         """
+        # Validate model if specified
+        if model:
+            logger.info("Validating model '{}' for subagent", model)
+            available_models = await list_models(
+                provider_name=self.provider.__class__.__name__.lower() if hasattr(self.provider, '__class__') else None,
+                api_key=self.provider.api_key,
+                api_base=self.provider.api_base,
+            )
+
+            # Handle None or empty list from list_models
+            if available_models is None:
+                available_models = []
+
+            if model not in available_models:
+                error_msg = f"Error: Model '{model}' is not available from the provider. " \
+                           f"Available models: {', '.join(available_models) if available_models else 'unknown'}"
+                logger.error("Model validation failed: {}", error_msg)
+                return error_msg
+
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         
@@ -79,7 +102,7 @@ class SubagentManager:
         
         # Create background task
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(task_id, task, display_label, origin, model)
         )
         self._running_tasks[task_id] = bg_task
         
@@ -95,9 +118,12 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        model: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
-        logger.info("Subagent [{}] starting task: {}", task_id, label)
+        # Use provided model or fall back to manager's default
+        subagent_model = model or self.model
+        logger.info("Subagent [{}] starting task with model: {}", task_id, subagent_model)
         
         try:
             # Build subagent tools (no message tool, no spawn tool)
@@ -133,7 +159,7 @@ class SubagentManager:
                 response = await self.provider.chat(
                     messages=messages,
                     tools=tools.get_definitions(),
-                    model=self.model,
+                    model=subagent_model,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 )

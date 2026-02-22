@@ -68,3 +68,18 @@ class LLMProvider(ABC):
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
         pass
+
+    async def get_models(self) -> list[str]:
+        """
+        Query available models from the provider.
+
+        Returns a list of model IDs available for use.
+        For gateways and local providers, this queries their /v1/models endpoint.
+        For direct providers, this may be a static list or require API call.
+
+        Returns:
+            List of available model identifiers (e.g., ["gpt-4", "gpt-3.5-turbo"])
+        """
+        # Default implementation - return empty list or raise NotImplementedError
+        # Subclasses should override this if they support model listing
+        return []

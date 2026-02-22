@@ -29,6 +29,7 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    failure_tracker: Any = None  # Optional FailureTracker instance
     
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -66,11 +67,12 @@ class SessionManager:
     Sessions are stored as JSONL files in the sessions directory.
     """
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, failure_tracker: Any = None):
         self.workspace = workspace
         self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = Path.home() / ".nanobot" / "sessions"
         self._cache: dict[str, Session] = {}
+        self.failure_tracker = failure_tracker
     
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
@@ -85,20 +87,22 @@ class SessionManager:
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
-        
+
         Args:
             key: Session key (usually channel:chat_id).
-        
+
         Returns:
             The session.
         """
         if key in self._cache:
             return self._cache[key]
-        
+
         session = self._load(key)
         if session is None:
-            session = Session(key=key)
-        
+            session = Session(key=key, failure_tracker=self.failure_tracker)
+        elif self.failure_tracker and not session.failure_tracker:
+            session.failure_tracker = self.failure_tracker
+
         self._cache[key] = session
         return session
     
@@ -141,7 +145,8 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
+                failure_tracker=self.failure_tracker
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
@@ -158,7 +163,8 @@ class SessionManager:
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
+                "last_consolidated": session.last_consolidated,
+                "failure_tracker": session.failure_tracker is not None
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:

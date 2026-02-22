@@ -6,6 +6,7 @@ from typing import Any
 
 import json_repair
 from openai import AsyncOpenAI
+import httpx
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -45,3 +46,68 @@ class CustomProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self.default_model
+
+    async def _query_lm_studio_v0_api(self) -> list[dict[str, Any]]:
+        """
+        Query LM Studio v0 REST API for model metadata including context length.
+        Returns a list of model info with context_length extracted.
+        """
+        # LM Studio v0 API endpoint
+        base_url = str(self._client.base_url)
+        # Remove '/v1/' and add '/api/v0/models'
+        v0_api_url = f"{base_url.replace('/v1/', '')}/api/v0/models"
+        headers = {"Authorization": f"Bearer {self._client.api_key}"}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(v0_api_url, headers=headers, timeout=10.0)
+                response.raise_for_status()
+                data = response.json()
+
+                # Parse model information - LM Studio v0 uses "data" field
+                models = []
+                for model_data in data.get("data", []):
+                    models.append({
+                        "id": model_data.get("id"),
+                        "context_length": model_data.get("max_context_length")
+                    })
+
+                return models
+
+        except httpx.HTTPError as e:
+            print(f"Warning: Failed to query LM Studio v0 API: {e}")
+            return []
+        except Exception as e:
+            print(f"Warning: Unexpected error querying LM Studio v0 API: {e}")
+            return []
+
+    async def get_models(self) -> list[dict[str, Any]]:
+        """
+        Query available models from the LM Studio v0 API.
+        Returns a list of model metadata including context_length.
+        Falls back to OpenAI-compatible API if v0 API fails.
+        """
+        # Try LM Studio v0 API first
+        v0_models = await self._query_lm_studio_v0_api()
+
+        if v0_models:
+            return v0_models
+
+        # Fallback to OpenAI-compatible API
+        try:
+            models = await self._client.models.list()
+            return [
+                {
+                    "id": model.id,
+                    "context_length": getattr(model, "context_length", None)
+                }
+                for model in models.data
+            ]
+        except Exception as e:
+            # If listing fails, return default model info
+            return [
+                {
+                    "id": self.default_model,
+                    "context_length": None
+                }
+            ]

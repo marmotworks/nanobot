@@ -1,0 +1,20 @@
+{
+  "model_policies": {
+    "main_loop_model": "zai-org/glm-4.7-flash",
+    "subagent_defaults": {
+      "technical_tasks": "qwen3-coder-next",
+      "vision_tasks": "glm-4.6v-flash"
+    },
+    "forbidden_for_subagents": ["zai-org/glm-4.7-flash"],
+    "max_concurrent_subagents": 4,
+    "max_total_subagents": 12,
+    "concurrency_by_model": {
+      "zai-org/glm-4.7-flash": 4,
+      "qwen3-coder-next": 4,
+      "glm-4.6v-flash": 4
+    }
+  },
+  "vision_task_instructions": {
+    "glm-4.6v-flash": "Provide detailed, accurate analysis. Pay special attention to: alignment, spacing, color contrast, button states, error messages, and visual hierarchy. Describe visual elements clearly and specifically."
+  }
+}

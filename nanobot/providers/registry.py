@@ -460,3 +460,95 @@ def find_by_name(name: str) -> ProviderSpec | None:
         if spec.name == name:
             return spec
     return None
+
+
+async def list_models(
+    provider_name: str | None = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
+) -> list[str]:
+    """
+    Query available models from a provider.
+
+    Args:
+        provider_name: The config key for the provider (e.g., "custom", "openai")
+        api_key: Provider API key
+        api_base: Provider base URL
+
+    Returns:
+        List of available model identifiers
+
+    Examples:
+        >>> models = await list_models("custom", "sk-xxx", "http://localhost:8000/v1")
+        >>> print(models)
+        ["gpt-4", "gpt-3.5-turbo"]
+    """
+    # Find provider spec
+    spec = None
+    if provider_name:
+        spec = find_by_name(provider_name)
+    else:
+        # Auto-detect gateway/local provider
+        spec = find_gateway(provider_name, api_key, api_base)
+
+    if not spec:
+        return []
+
+    # For gateways and local providers, try to query models from the API
+    if spec.is_gateway or spec.is_local:
+        return await _list_models_from_gateway(spec, api_key, api_base)
+
+    # For direct providers, return default model
+    if spec.is_direct:
+        # For custom provider, we'd need to instantiate it to get models
+        # This is a simplification - in practice, you'd need to handle each provider
+        return []
+
+    # For standard providers, return empty list (they don't have model listing)
+    return []
+
+
+async def _list_models_from_gateway(
+    spec: ProviderSpec,
+    api_key: str | None = None,
+    api_base: str | None = None,
+) -> list[str]:
+    """
+    Query models from a gateway/local provider via API.
+
+    Args:
+        spec: Provider specification
+        api_key: Provider API key
+        api_base: Provider base URL
+
+    Returns:
+        List of available model identifiers
+    """
+    import aiohttp
+
+    # Build base URL
+    base_url = api_base or spec.default_api_base
+    if not base_url:
+        return []
+
+    # Clean up base URL (ensure it ends with /v1)
+    base_url = base_url.rstrip("/").rstrip("v1")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{base_url}/models"
+            headers = {}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return [model["id"] for model in data.get("data", [])]
+                else:
+                    # If we can't list models, return empty list
+                    return []
+
+    except Exception:
+        # If anything fails, return empty list (will fall back to default model)
+        return []

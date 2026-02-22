@@ -21,6 +21,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.policy_manager import PolicyManager
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -88,6 +89,7 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+        self.policy_manager = PolicyManager(workspace / "config" / "policies.json")
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -110,7 +112,7 @@ class AgentLoop:
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
-        self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(SpawnTool(manager=self.subagents, policy_manager=self.policy_manager))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
