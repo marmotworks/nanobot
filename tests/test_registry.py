@@ -1,10 +1,13 @@
 """Unit tests for SubagentRegistry."""
 
+import asyncio
 import sqlite3
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.registry import SubagentRegistry
+from nanobot.agent.subagent import SubagentManager
 
 
 @pytest.fixture
@@ -222,3 +225,38 @@ class TestSubagentRegistryGetRetryCount:
     def test_get_retry_count_not_found(self, registry: SubagentRegistry) -> None:
         """Unknown task_id returns 0."""
         assert registry.get_retry_count("nonexistent") == 0
+
+
+@pytest.mark.integration
+async def test_capacity_enforcement(tmp_path) -> None:
+    """Spawning a 4th subagent when 3 are running raises RuntimeError with 'capacity'."""
+    # Create mocks for provider and bus
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    bus = AsyncMock()
+
+    # Create SubagentManager
+    manager = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        db_path=tmp_path / "subagents.db",
+    )
+
+    # Patch _run_subagent to be an AsyncMock that sleeps forever
+    async def sleep_forever(*args, **kwargs):
+        await asyncio.sleep(3600)
+
+    manager._run_subagent = AsyncMock(side_effect=sleep_forever)
+
+    # Manually tag in 3 tasks to simulate capacity being full
+    manager.registry.tag_in("task1", "test task 1", "user")
+    manager.registry.tag_in("task2", "test task 2", "user")
+    manager.registry.tag_in("task3", "test task 3", "user")
+
+    # Verify we have 3 running tasks
+    assert manager.registry.get_running_count() == 3
+
+    # Spawn a 4th time - should raise RuntimeError with "capacity" in message
+    with pytest.raises(RuntimeError, match="capacity"):
+        await manager.spawn("test task 4")
