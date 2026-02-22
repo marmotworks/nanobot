@@ -14,7 +14,11 @@ A step-by-step checklist for auditing backlog health.
 
 5. **Unclosed completed tasks** — Any task with status "Complete ✅" that still appears in the active section must be closed out: announce on Discord, move a summary entry to `## Completed`, remove the full block from the active section. Follow the **Close Out** workflow in `SKILL.md`.
 
-6. **Blocked tasks** — Verify the blocker still applies. If the blocking task is complete, unblock.
+6. **Blocked tasks** — Run `check_readiness.py` to automatically clear any stale blockers:
+   ```bash
+   python3 /Users/mhall/Workspaces/nanobot/nanobot/skills/task-tracker/scripts/check_readiness.py
+   ```
+   Review its output. If it cleared blockers, those tasks/milestones are now candidates for dispatch.
 
 7. **Milestone criterion quality** — Spot-check 2-3 milestones. Each must have: a runnable command, an expected output, and a single file. Flag any that are vague.
 

@@ -38,10 +38,17 @@ Do NOT leave completed tasks in the active section. Do NOT skip the Discord anno
 
 ### Cron Dispatch
 
-Follow two-phase dispatch:
+**Step 0 — Run readiness check first (mandatory):**
+```bash
+python3 /Users/mhall/Workspaces/nanobot/nanobot/skills/task-tracker/scripts/check_readiness.py
+```
+This clears any stale blockers before dispatch. Always run this before selecting the next milestone.
+
+Then follow two-phase dispatch via the `dispatch` skill — read `/Users/mhall/Workspaces/nanobot/nanobot/skills/dispatch/SKILL.md` and follow its checklist. Do not improvise the dispatch process.
+
 1. **Phase 1 (planning)**: If a task has status "Not started" and no milestones → spawn planning subagent (qwen3-coder-next). Planning subagent must web search first, cite sources inline in BACKLOG.md.
-2. **Phase 2 (execution)**: If a task has milestones and the next unchecked milestone has no blocker and is not in-progress → spawn execution subagent (qwen3-coder-next) for that one milestone.
+2. **Phase 2 (execution)**: If a task has milestones and the next unchecked milestone has `Blocker: none` and is not `[~]` → use the `dispatch` skill to spawn an execution subagent (qwen3-coder-next) for that one milestone.
 3. Skip tasks marked `Blocked` or `Complete`.
 4. Skip milestones marked `[~]` (in-progress).
-5. Dispatch at most **1 background subagent at a time** (conservative default until registry is verified).
-6. After dispatching, mark the milestone `[~]` in BACKLOG.md.
+5. Dispatch at most **1 background subagent at a time**.
+6. After dispatching, mark the milestone `[~]` in BACKLOG.md (the dispatch checklist enforces this).
