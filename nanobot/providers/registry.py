@@ -84,7 +84,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # === AWS Bedrock (direct, bypasses LiteLLM) ============================
     ProviderSpec(
         name="bedrock",
-        keywords=("bedrock", "us.anthropic.claude", "anthropic.claude"),
+        keywords=("bedrock", "us.anthropic.claude", "anthropic.claude", "minimax.minimax"),
         env_key="",
         display_name="AWS Bedrock",
         litellm_prefix="",

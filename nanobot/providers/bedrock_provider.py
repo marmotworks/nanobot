@@ -43,23 +43,28 @@ class BedrockProvider(LLMProvider):
         bedrock_messages: list[dict[str, Any]] = []
         system_prompts: list[dict[str, Any]] = []
 
-        for msg in messages:
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
             role = msg.get("role", "")
-            content = msg.get("content", "")
 
             if role == "system":
-                system_prompts.append({"text": content})
+                system_prompts.append({"text": msg.get("content", "")})
+                i += 1
             elif role == "tool":
-                tool_call_id = msg.get("tool_call_id", "")
-                bedrock_messages.append({
-                    "role": "user",
-                    "content": [{
+                # Collect all consecutive tool messages
+                tool_results = []
+                while i < len(messages) and messages[i].get("role") == "tool":
+                    m = messages[i]
+                    tool_results.append({
                         "toolResult": {
-                            "toolUseId": tool_call_id,
-                            "content": [{"text": str(content)}],
+                            "toolUseId": m.get("tool_call_id", ""),
+                            "content": [{"text": str(m.get("content", ""))}],
                         },
-                    }],
-                })
+                    })
+                    i += 1
+                bedrock_messages.append({"role": "user", "content": tool_results})
+                continue
             elif role == "assistant" and "tool_calls" in msg:
                 tool_uses = []
                 for tc in msg.get("tool_calls", []):
@@ -77,11 +82,14 @@ class BedrockProvider(LLMProvider):
                     "role": "assistant",
                     "content": tool_uses,
                 })
+                i += 1
             else:
+                content = msg.get("content", "")
                 bedrock_messages.append({
                     "role": role,
                     "content": [{"text": content}],
                 })
+                i += 1
 
         return self._sanitize_bedrock_messages(bedrock_messages), system_prompts
 
@@ -106,9 +114,6 @@ class BedrockProvider(LLMProvider):
             return bedrock_messages
 
         # Pass 1: Identify assistant+toolUse messages that need removal
-        # A toolUse at the end of the list (no following message) is VALID and must be kept.
-        # A toolUse followed by a non-user message is INVALID and must be stripped.
-        # A toolUse followed by a user message without ALL matching toolResult IDs is INVALID and must be stripped.
         assistant_to_remove: set[int] = set()
         orphaned_tool_result_ids: set[str] = set()
 
@@ -116,7 +121,6 @@ class BedrockProvider(LLMProvider):
             if msg.get("role") != "assistant":
                 continue
 
-            # Check if this assistant message has toolUse blocks
             content = msg.get("content", [])
             tool_use_ids: set[str] = set()
             for block in content:
@@ -124,34 +128,33 @@ class BedrockProvider(LLMProvider):
                     tool_use_ids.add(block["toolUse"].get("toolUseId", ""))
 
             if not tool_use_ids:
-                continue  # No toolUse blocks, skip
-
-            # Check if the immediately next message is a user message with ALL toolResult blocks
-            next_idx = idx + 1
-
-            # If there's no next message, the toolUse is valid (results may follow in actual usage)
-            if next_idx >= len(bedrock_messages):
-                continue  # Keep toolUse at end
-
-            next_msg = bedrock_messages[next_idx]
-
-            # If next message is not a user message, this toolUse is invalid
-            if next_msg.get("role") != "user":
-                assistant_to_remove.add(idx)
-                orphaned_tool_result_ids.update(tool_use_ids)
                 continue
 
-            # Next message is a user message - check if it has ALL toolResult blocks
-            next_content = next_msg.get("content", [])
-            result_ids_in_next: set[str] = set()
-            for block in next_content:
-                if "toolResult" in block:
-                    result_ids_in_next.add(block["toolResult"].get("toolUseId", ""))
-            # Check if all toolUse IDs are covered
-            if result_ids_in_next >= tool_use_ids:
-                continue  # Valid pair, keep both
+            # Collect ALL tool result IDs from consecutive user+toolResult messages immediately following
+            covered_ids: set[str] = set()
+            scan_idx = idx + 1
+            while scan_idx < len(bedrock_messages):
+                next_msg = bedrock_messages[scan_idx]
+                if next_msg.get("role") != "user":
+                    break
+                next_content = next_msg.get("content", [])
+                has_tool_result = any("toolResult" in block for block in next_content)
+                if not has_tool_result:
+                    break
+                for block in next_content:
+                    if "toolResult" in block:
+                        covered_ids.add(block["toolResult"].get("toolUseId", ""))
+                scan_idx += 1
 
-            # User message exists but doesn't have all toolResult blocks - invalid
+            # If no following messages at all, keep (valid — waiting for results)
+            if scan_idx == idx + 1 and scan_idx >= len(bedrock_messages):
+                continue
+
+            # If all IDs are covered, valid pair
+            if covered_ids >= tool_use_ids:
+                continue
+
+            # Otherwise, mark for removal
             assistant_to_remove.add(idx)
             orphaned_tool_result_ids.update(tool_use_ids)
 
@@ -224,6 +227,8 @@ class BedrockProvider(LLMProvider):
         for block in content_blocks:
             if "text" in block:
                 text = block["text"]
+            elif "reasoningContent" in block:
+                pass  # skip reasoning/thinking blocks
             elif "toolUse" in block:
                 tool_use = block["toolUse"]
                 tool_calls.append(ToolCallRequest(

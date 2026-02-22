@@ -176,3 +176,116 @@ class TestBedrockProvider:
             tool_use = converted[0]["content"][0]["toolUse"]
             assert isinstance(tool_use["input"], dict), "toolUse.input must be a dict"
             assert tool_use["input"] == {"city": "Austin"}
+
+    @pytest.mark.asyncio
+    async def test_sanitize_unpaired_tool_use_in_middle(self):
+        """Test that unpaired toolUse in middle of history is stripped."""
+        with patch("boto3.client"):
+            provider = BedrockProvider(default_model="us.anthropic.claude-sonnet-4-6")
+
+            # Build Bedrock-format messages:
+            # 1. User message
+            # 2. Assistant with toolUse (ID: "t1") - this will be stripped (no toolResult follows)
+            # 3. User with plain text (NOT a toolResult) - this is the unpaired case
+            # 4. Assistant with plain text - this should be preserved
+            messages = [
+                {"role": "user", "content": [{"text": "Hello"}]},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "toolUse": {
+                                "toolUseId": "t1",
+                                "name": "get_weather",
+                                "input": {"city": "Austin"},
+                            }
+                        }
+                    ],
+                },
+                {"role": "user", "content": [{"text": "Another user message"}]},
+                {"role": "assistant", "content": [{"text": "Final response"}]},
+            ]
+
+            sanitized = provider._sanitize_bedrock_messages(messages)
+
+            # Unpaired assistant+toolUse message should be stripped
+            # Clean user→assistant exchange at the end should be preserved
+            assert len(sanitized) == 3
+            assert sanitized[0]["role"] == "user"
+            assert sanitized[0]["content"][0]["text"] == "Hello"
+            assert sanitized[1]["role"] == "user"
+            assert sanitized[1]["content"][0]["text"] == "Another user message"
+            assert sanitized[2]["role"] == "assistant"
+            assert sanitized[2]["content"][0]["text"] == "Final response"
+
+            # No toolUse blocks should remain in output
+            for msg in sanitized:
+                for block in msg.get("content", []):
+                    assert "toolUse" not in block
+
+    @pytest.mark.asyncio
+    async def test_sanitize_multi_tool_call_valid_pair(self):
+        """Multiple tool calls in one assistant message with results split across multiple user messages must NOT be stripped."""
+        with patch("boto3.client"):
+            provider = BedrockProvider(default_model="us.anthropic.claude-sonnet-4-6")
+
+            messages = [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"toolUse": {"toolUseId": "t1", "name": "f1", "input": {}}},
+                        {"toolUse": {"toolUseId": "t2", "name": "f2", "input": {}}},
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [{"toolResult": {"toolUseId": "t1", "content": [{"text": "r1"}]}}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"toolResult": {"toolUseId": "t2", "content": [{"text": "r2"}]}}],
+                },
+                {"role": "assistant", "content": [{"text": "done"}]},
+            ]
+            result = provider._sanitize_bedrock_messages(messages)
+            assert len(result) == 4, f"Expected 4 messages (valid pair), got {len(result)}: {result}"
+            assert result[0]["content"][0]["toolUse"]["toolUseId"] == "t1"
+
+    @pytest.mark.asyncio
+    async def test_strip_unpaired_tool_calls(self):
+        """Test that OpenAI-style unpaired toolUse/toolResult is stripped after conversion."""
+        with patch("boto3.client"):
+            provider = BedrockProvider(default_model="us.anthropic.claude-sonnet-4-6")
+
+            # OpenAI-style messages with unpaired toolUse (assistant message with tool_calls
+            # but no corresponding tool result follows)
+            messages = [
+                {"role": "user", "content": "What's the weather?"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "t1",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": {"city": "Austin"}},
+                        }
+                    ],
+                },
+                {"role": "user", "content": "Never mind, I changed my mind."},
+            ]
+
+            converted, _ = provider._convert_messages(messages)
+
+            # The assistant message with toolUse should be stripped because there's no toolResult
+            # Only the two user messages should remain
+            assert len(converted) == 2
+            assert converted[0]["role"] == "user"
+            assert converted[0]["content"][0]["text"] == "What's the weather?"
+            assert converted[1]["role"] == "user"
+            assert converted[1]["content"][0]["text"] == "Never mind, I changed my mind."
+
+            # Verify no toolUse blocks remain
+            for msg in converted:
+                for block in msg.get("content", []):
+                    assert "toolUse" not in block
