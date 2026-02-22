@@ -29,12 +29,22 @@ class ContextTracker:
         """Load initial context from provider."""
         models = await self.provider.get_models()
         for model in models:
-            max_ctx = model.get("loaded_context_length") or model.get("max_context_length") or 0
-            self.context_usage[model["id"]] = {
+            # get_models() may return dicts (LM Studio) or strings (Bedrock)
+            if isinstance(model, str):
+                model_id = model
+                max_ctx = 0
+                metadata: dict = {}
+            else:
+                model_id = model.get("id", "")
+                max_ctx = model.get("loaded_context_length") or model.get("max_context_length") or 0
+                metadata = model
+            if not model_id:
+                continue
+            self.context_usage[model_id] = {
                 "max": max_ctx,
                 "used": 0,
                 "percent": 0.0,
-                "metadata": model
+                "metadata": metadata,
             }
 
     def add_tokens(self, model_id: str, tokens: int) -> None:
