@@ -11,7 +11,10 @@ from telegram import BotCommand, ReplyParameters, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.schema import TelegramConfig
 
 if TYPE_CHECKING:
     from nanobot.bus.events import OutboundMessage
