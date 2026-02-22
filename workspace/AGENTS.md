@@ -201,13 +201,12 @@ The execution subagent reports pass/fail. The main agent **independently verifie
 
 ### Cron Handler Logic
 
+**Use the `dispatch` skill** (`nanobot/skills/dispatch/SKILL.md`) for all subagent dispatch actions. Read and follow its checklist — do not improvise the dispatch process.
+
 When the cron fires:
-1. Read `BACKLOG.md`
-2. Skip tasks marked `Blocked` or `Complete`
-3. Find the first task with status `Not started` and no milestones → spawn **planning subagent**
-4. Find the first task with milestones and the next unchecked milestone with no blocker → spawn **execution subagent**
-5. If a milestone is `In progress` → check if the subagent has reported back; verify and mark done or retry
-6. Dispatch at most **2 background subagents at a time** (reserve capacity for user requests). Until Task 10 (subagent registry) is complete and active subagent count can be verified programmatically, default to **1 background subagent at a time** to avoid overloading capacity.
+1. Read the `dispatch` skill: `/Users/mhall/Workspaces/nanobot/nanobot/skills/dispatch/SKILL.md`
+2. Follow the dispatch checklist step by step
+3. Dispatch at most **1 background subagent at a time** (conservative default)
 
 ### BACKLOG.md Milestone Format
 
