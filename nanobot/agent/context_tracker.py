@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from loguru import logger
+
 
 class ContextTracker:
     """Track context window usage across models with LM Studio metadata."""
