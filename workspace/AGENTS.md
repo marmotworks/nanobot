@@ -199,7 +199,7 @@ When the cron fires:
 3. Find the first task with status `Not started` and no milestones → spawn **planning subagent**
 4. Find the first task with milestones and the next unchecked milestone with no blocker → spawn **execution subagent**
 5. If a milestone is `In progress` → check if the subagent has reported back; verify and mark done or retry
-6. Dispatch at most 2 background subagents at a time (reserve capacity for user requests)
+6. Dispatch at most **2 background subagents at a time** (reserve capacity for user requests). Until Task 10 (subagent registry) is complete and active subagent count can be verified programmatically, default to **1 background subagent at a time** to avoid overloading capacity.
 
 ### BACKLOG.md Milestone Format
 

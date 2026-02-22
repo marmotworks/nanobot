@@ -175,6 +175,57 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    async def _chat_with_fallback(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+    ):
+        """Call provider.chat(), falling back to local glm-4.7-flash on rate limit or auth errors."""
+        from nanobot.providers.base import LLMResponse
+
+        response = await self.provider.chat(
+            messages=messages,
+            tools=tools,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        # Detect rate limit / auth / overload errors returned as content strings
+        content = response.content or ""
+        is_error = response.finish_reason == "error" or (
+            isinstance(content, str) and content.startswith("Error calling LLM:")
+        )
+        is_fallback_error = is_error and any(
+            kw in content for kw in ("rate_limit", "RateLimitError", "overloaded", "AuthenticationError", "quota")
+        )
+
+        if is_fallback_error:
+            logger.warning("Primary provider error — falling back to local glm-4.7-flash: {}", content[:120])
+            try:
+                from nanobot.providers.custom_provider import CustomProvider
+                fallback = CustomProvider(
+                    api_key="lm-studio",
+                    api_base="http://localhost:1234/v1",
+                    default_model="zai-org/glm-4.7-flash",
+                )
+                response = await fallback.chat(
+                    messages=messages,
+                    tools=tools,
+                    model="zai-org/glm-4.7-flash",
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                logger.info("Fallback to glm-4.7-flash succeeded")
+            except Exception as e:
+                logger.error("Fallback provider also failed: {}", e)
+                return LLMResponse(content=f"Both primary and fallback providers failed: {e}", finish_reason="error")
+
+        return response
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -189,7 +240,7 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
+            response = await self._chat_with_fallback(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model,

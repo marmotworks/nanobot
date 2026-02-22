@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar, TYPE_CHECKING
 
 from loguru import logger
 

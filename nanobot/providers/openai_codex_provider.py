@@ -5,10 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from typing import Any, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from loguru import logger

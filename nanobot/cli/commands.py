@@ -3,10 +3,10 @@
 import asyncio
 import contextlib
 import os
+from pathlib import Path
 import select
 import signal
 import sys
-from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
