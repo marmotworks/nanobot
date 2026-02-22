@@ -94,3 +94,6 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require external services (e.g. LM Studio at localhost:1234)",
+]

@@ -9,7 +9,7 @@ class ContextTracker:
     def __init__(
         self,
         provider: Any,
-        warn_thresholds: list[float] = [0.8, 0.9, 1.0]
+        warn_thresholds: list[float] = [80.0, 90.0, 100.0]
     ):
         """
         Initialize context tracker.
@@ -27,8 +27,9 @@ class ContextTracker:
         """Load initial context from provider."""
         models = await self.provider.get_models()
         for model in models:
+            max_ctx = model.get("loaded_context_length") or model.get("max_context_length") or 0
             self.context_usage[model["id"]] = {
-                "max": model.get("loaded_context_length", 0),
+                "max": max_ctx,
                 "used": 0,
                 "percent": 0.0,
                 "metadata": model
@@ -88,9 +89,8 @@ class ContextTracker:
         """
         usage = self.context_usage[model_id]
         for threshold in self.warn_thresholds:
-            if usage["percent"] >= threshold and usage["percent"] < threshold + 0.05:
-                # TODO: Integrate with notification system
-                pass
+            if usage["percent"] >= threshold and usage["percent"] < threshold + 5.0:
+                logger.warning("Context window usage for {} at {:.1f}% (threshold: {}%)", model_id, usage["percent"], threshold)
 
     def format_usage(self) -> str:
         """
@@ -99,14 +99,16 @@ class ContextTracker:
         Returns:
             Formatted string showing usage for all models
         """
-        lines = ["Context Window Usage:"]
+        lines = []
         for model_id, usage in self.context_usage.items():
             if usage["max"] > 0:
                 lines.append(
                     f"  {model_id}: {usage['used']:>6} / {usage['max']:>6} tokens "
                     f"({usage['percent']:>5.1f}%)"
                 )
-        return "\n".join(lines)
+        if not lines:
+            return ""
+        return "Context Window Usage:\n" + "\n".join(lines)
 
     def get_max_tokens(self, model_id: str) -> int:
         """

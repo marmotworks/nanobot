@@ -94,6 +94,7 @@ class AgentLoop:
         )
         self.policy_manager = PolicyManager(workspace / "config" / "policies.json")
         self.context_tracker = ContextTracker(provider)
+        self.set_context_tracker(self.context_tracker)
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -199,6 +200,10 @@ class AgentLoop:
                 max_tokens=self.max_tokens,
             )
 
+            # Feed token usage into context tracker
+            if response.usage and "total_tokens" in response.usage:
+                self.context_tracker.add_tokens(self.model, response.usage["total_tokens"])
+
             if response.has_tool_calls:
                 if on_progress:
                     clean = self._strip_think(response.content)
@@ -240,6 +245,11 @@ class AgentLoop:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
         await self._connect_mcp()
+        try:
+            await self.context_tracker._load_initial_context()
+            logger.info("Context tracker initialized with {} models", len(self.context_tracker.context_usage))
+        except Exception as e:
+            logger.warning("Context tracker initialization failed (non-fatal): {}", e)
         logger.info("Agent loop started")
 
         while self._running:
@@ -403,6 +413,11 @@ class AgentLoop:
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
         await self._connect_mcp()
+        try:
+            await self.context_tracker._load_initial_context()
+            logger.info("Context tracker initialized with {} models", len(self.context_tracker.context_usage))
+        except Exception as e:
+            logger.warning("Context tracker initialization failed (non-fatal): {}", e)
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""
