@@ -134,6 +134,17 @@ class SubagentManager:
             )
             return CustomProvider(api_key=api_key, api_base=api_base, default_model=model)
 
+        elif provider_name == "bedrock":
+            from nanobot.providers.bedrock_provider import BedrockProvider
+            region = getattr(getattr(self._config.providers, "bedrock", None), "region", "us-east-1")
+            default_model = model
+            logger.info(
+                "SubagentManager: Creating BedrockProvider(region='{}') for model='{}'",
+                region,
+                model,
+            )
+            return BedrockProvider(region_name=region, default_model=default_model)
+
         if provider_name and provider_name != self._config.get_provider_name(self.model):
             # Different provider than the main agent — build it from config
             from nanobot.providers.litellm_provider import LiteLLMProvider
@@ -200,23 +211,27 @@ class SubagentManager:
                 candidate_provider.api_base,
             )
 
-            try:
-                available_models = await list_models(
-                    provider_name=provider_class_name,
-                    api_key=candidate_provider.api_key,
-                    api_base=candidate_provider.api_base,
-                )
-            except Exception as e:
-                logger.error("SubagentManager: list_models() failed: {}", e)
-                error_msg = f"Error: Failed to fetch available models from provider: {e!s}"
-                return error_msg
+            # BedrockProvider uses IAM auth — skip list_models validation
+            if provider_class_name == "BedrockProvider":
+                available_models = None  # skip validation
+            else:
+                try:
+                    available_models = await list_models(
+                        provider_name=provider_class_name,
+                        api_key=candidate_provider.api_key,
+                        api_base=candidate_provider.api_base,
+                    )
+                except Exception as e:
+                    logger.error("SubagentManager: list_models() failed: {}", e)
+                    error_msg = f"Error: Failed to fetch available models from provider: {e!s}"
+                    return error_msg
 
-            # Handle None or empty list from list_models
-            if available_models is None:
-                available_models = []
-                logger.warning(
-                    "SubagentManager: list_models returned None, defaulting to empty list"
-                )
+                # Handle None or empty list from list_models
+                if available_models is None:
+                    available_models = []
+                    logger.warning(
+                        "SubagentManager: list_models returned None, defaulting to empty list"
+                    )
 
             logger.info(
                 "SubagentManager: Available models from '{}': {}",
