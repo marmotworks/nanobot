@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 class PolicyManager:
     """Manages model usage policies and validates model selection."""
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Path | None = None):
         """Initialize policy manager with configuration."""
         if config_path is None:
             config_path = Path(__file__).parent / "config" / "policies.json"
@@ -16,9 +16,9 @@ class PolicyManager:
         self.config = self._load_config(config_path)
         self.vision_instructions = self.config["vision_task_instructions"]
 
-    def _load_config(self, config_path: Path) -> Dict:
+    def _load_config(self, config_path: Path) -> dict:
         """Load policy configuration from JSON file."""
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             return json.load(f)
 
     def get_main_loop_model(self) -> str:
@@ -45,7 +45,7 @@ class PolicyManager:
         forbidden = self.config["model_policies"]["forbidden_for_subagents"]
         return model in forbidden
 
-    def get_max_concurrent_subagents(self, model: Optional[str] = None) -> int:
+    def get_max_concurrent_subagents(self, model: str | None = None) -> int:
         """Get max concurrent subagents for a model."""
         if model:
             return self.config["model_policies"]["concurrency_by_model"].get(
@@ -61,7 +61,7 @@ class PolicyManager:
         """Get instructions for vision tasks."""
         return self.vision_instructions.get("glm-4.6v-flash", "")
 
-    def validate_model_selection(self, model: str, task_type: Optional[str] = None) -> tuple[bool, str]:
+    def validate_model_selection(self, model: str, task_type: str | None = None) -> tuple[bool, str]:
         """
         Validate that a model selection is allowed.
 
@@ -99,7 +99,7 @@ class PolicyManager:
         """Suggest an appropriate model for a task type."""
         return self.get_subagent_default(task_type)
 
-    def get_model_info(self, model: str) -> Dict:
+    def get_model_info(self, model: str) -> dict:
         """Get information about a model."""
         info = {
             "model": model,

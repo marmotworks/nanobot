@@ -1,12 +1,13 @@
 """Cron service for scheduling agent tasks."""
 
 import asyncio
-import json
-import time
-import uuid
+from collections.abc import Callable, Coroutine
 from datetime import datetime
+import json
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+import time
+from typing import Any
+import uuid
 
 from loguru import logger
 
@@ -30,8 +31,9 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
 
     if schedule.kind == "cron" and schedule.expr:
         try:
-            from croniter import croniter
             from zoneinfo import ZoneInfo
+
+            from croniter import croniter
             # Use caller-provided reference time for deterministic scheduling
             base_time = now_ms / 1000
             tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo

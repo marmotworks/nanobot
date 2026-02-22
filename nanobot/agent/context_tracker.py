@@ -11,7 +11,7 @@ class ContextTracker:
     def __init__(
         self,
         provider: Any,
-        warn_thresholds: list[float] = [80.0, 90.0, 100.0]
+        warn_thresholds: list[float] | None = None
     ):
         """
         Initialize context tracker.
@@ -21,7 +21,7 @@ class ContextTracker:
             warn_thresholds: List of usage percentages to trigger warnings
         """
         self.provider = provider
-        self.warn_thresholds = warn_thresholds
+        self.warn_thresholds = warn_thresholds if warn_thresholds is not None else [80.0, 90.0, 100.0]
         self.context_usage = {}  # {model_id: {"max": int, "used": int, "percent": float, "metadata": dict}}
         # Note: _load_initial_context() is async and should be awaited in async context
 

@@ -2,9 +2,9 @@
 
 import base64
 import mimetypes
-import platform
 from pathlib import Path
-from typing import Any
+import platform
+from typing import Any, ClassVar
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
@@ -18,7 +18,7 @@ class ContextBuilder:
     into a coherent prompt for the LLM.
     """
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
+    BOOTSTRAP_FILES: ClassVar[list[str]] = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
 
     def __init__(self, workspace: Path, failure_tracker: Any = None):
         self.workspace = workspace
@@ -30,10 +30,10 @@ class ContextBuilder:
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
         Build the system prompt from bootstrap files, memory, and skills.
-        
+
         Args:
             skill_names: Optional list of skills to include.
-        
+
         Returns:
             Complete system prompt.
         """
@@ -96,7 +96,7 @@ Skills with available="false" need dependencies installed first - you can try in
 
         return f"""# nanobot 🐈
 
-You are nanobot, a helpful AI assistant. 
+You are nanobot, a helpful AI assistant.
 
 ## Current Time
 {now} ({tz})
@@ -187,7 +187,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
 
         if not images:
             return text
-        return images + [{"type": "text", "text": text}]
+        return [*images, {"type": "text", "text": text}]
 
     def add_tool_result(
         self,
@@ -198,13 +198,13 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
     ) -> list[dict[str, Any]]:
         """
         Add a tool result to the message list.
-        
+
         Args:
             messages: Current message list.
             tool_call_id: ID of the tool call.
             tool_name: Name of the tool.
             result: Tool execution result.
-        
+
         Returns:
             Updated message list.
         """
@@ -225,13 +225,13 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
     ) -> list[dict[str, Any]]:
         """
         Add an assistant message to the message list.
-        
+
         Args:
             messages: Current message list.
             content: Message content.
             tool_calls: Optional tool calls.
             reasoning_content: Thinking output (Kimi, DeepSeek-R1, etc.).
-        
+
         Returns:
             Updated message list.
         """

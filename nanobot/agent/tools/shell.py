@@ -1,9 +1,10 @@
 """Shell execution tool."""
 
 import asyncio
+import contextlib
 import os
-import re
 from pathlib import Path
+import re
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -80,14 +81,12 @@ class ExecTool(Tool):
                     process.communicate(),
                     timeout=self.timeout
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
                 # Wait for the process to fully terminate so pipes are
                 # drained and file descriptors are released.
-                try:
+                with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
                 return f"Error: Command timed out after {self.timeout} seconds"
 
             output_parts = []
@@ -113,7 +112,7 @@ class ExecTool(Tool):
             return result
 
         except Exception as e:
-            return f"Error executing command: {str(e)}"
+            return f"Error executing command: {e!s}"
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
@@ -124,8 +123,7 @@ class ExecTool(Tool):
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
-        if self.allow_patterns:
-            if not any(re.search(p, lower) for p in self.allow_patterns):
+        if self.allow_patterns and not any(re.search(p, lower) for p in self.allow_patterns):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
         if self.restrict_to_workspace:

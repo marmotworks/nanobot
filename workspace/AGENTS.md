@@ -148,3 +148,14 @@ When dispatching subagents for code tasks:
 - **Prefer measurable increments** — each subagent task should have a clear pass/fail criterion (e.g. specific test passes, grep confirms a line exists).
 - **Prefer Option A (unit tests)** over integration tests wherever possible — mock external dependencies; don't rely on localhost services in CI.
 - **Guard integration tests** — any test that hits a real network endpoint must be marked `@pytest.mark.integration` and excluded from the default test run with `-k "not integration"`.
+
+## Task Sizing Rules
+
+Every subagent task must be sized to fit well within the model's context window and complete reliably:
+
+- **One file per subagent** for code fixes. Never ask a subagent to fix violations across multiple files in one task.
+- **One milestone per subagent** for feature work. A milestone is a single verifiable increment (e.g. "install X and verify it works", "write the provider class", "write tests for the provider").
+- **Milestones must have a measurable pass/fail criterion** stated explicitly in the task brief (e.g. "`ruff check nanobot/channels/feishu.py` reports 0 errors", "all 132 tests pass").
+- **Break down before dispatching** — if a task has more than ~5 logical changes or touches more than one file, split it into multiple subagent tasks and dispatch them sequentially or in parallel as dependencies allow.
+- **Progressive decomposition** — for large features, start with a planning subagent that reads the relevant files and produces a milestone breakdown. Then dispatch one subagent per milestone.
+- **Context budget** — assume each subagent has ~32k tokens of usable context. A task brief + one file + verification commands should comfortably fit. If you need to include multiple files, keep them short or include only the relevant sections.

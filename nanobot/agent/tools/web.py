@@ -4,7 +4,7 @@ import html
 import json
 import os
 import re
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlparse
 
 import httpx
@@ -48,7 +48,7 @@ class WebSearchTool(Tool):
 
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
-    parameters = {
+    parameters: ClassVar[dict] = {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query"},
@@ -95,7 +95,7 @@ class WebFetchTool(Tool):
 
     name = "web_fetch"
     description = "Fetch URL and extract readable content (HTML → markdown/text)."
-    parameters = {
+    parameters: ClassVar[dict] = {
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "URL to fetch"},
@@ -108,7 +108,7 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
 
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:  # noqa: N803
         from readability import Document
 
         max_chars = maxChars or self.max_chars

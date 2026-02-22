@@ -1,9 +1,9 @@
 """Session management for conversation history."""
 
-import json
-from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
+import json
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -179,7 +179,7 @@ class SessionManager:
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         List all sessions.
-        
+
         Returns:
             List of session info dicts.
         """

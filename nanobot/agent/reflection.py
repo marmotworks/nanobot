@@ -1,9 +1,5 @@
 """ReflectionEngine - Self-reflective capability for analyzing and improving agent behavior."""
 
-from typing import List, Dict
-import asyncio
-from datetime import datetime
-
 from nanobot.providers.llm import LLMClient
 
 
@@ -19,7 +15,7 @@ class ReflectionEngine:
         """
         self.llm_client = llm_client
 
-    async def analyze_behavior(self, messages: List[Dict]) -> Dict:
+    async def analyze_behavior(self, messages: list[dict]) -> dict:
         """
         Analyze agent behavior patterns from conversation history.
 
@@ -65,7 +61,7 @@ class ReflectionEngine:
             "response_length": response_length,
         }
 
-    async def generate_improvements(self, analysis: Dict) -> List[str]:
+    async def generate_improvements(self, analysis: dict) -> list[str]:
         """
         Generate improvement suggestions based on behavior analysis.
 
@@ -122,7 +118,7 @@ class ReflectionEngine:
 
         return suggestions
 
-    async def evaluate_decision(self, tool_call: Dict, result: str) -> str:
+    async def evaluate_decision(self, tool_call: dict, result: str) -> str:
         """
         Evaluate if a tool call was appropriate and effective.
 
@@ -138,7 +134,7 @@ class ReflectionEngine:
 
         return f"Tool {tool_name} was {tool_success} with result length {len(result)} characters."
 
-    async def detect_patterns(self, session: List[Dict]) -> List[Dict]:
+    async def detect_patterns(self, session: list[dict]) -> list[dict]:
         """
         Detect recurring patterns in agent behavior.
 

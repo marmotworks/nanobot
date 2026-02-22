@@ -1,18 +1,18 @@
 """Base class for agent tools."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 
 class Tool(ABC):
     """
     Abstract base class for agent tools.
-    
+
     Tools are capabilities that the agent can use to interact with
     the environment, such as reading files, executing commands, etc.
     """
 
-    _TYPE_MAP = {
+    _TYPE_MAP: ClassVar[dict] = {
         "string": str,
         "integer": int,
         "number": (int, float),
@@ -43,10 +43,10 @@ class Tool(ABC):
     async def execute(self, **kwargs: Any) -> str:
         """
         Execute the tool with given parameters.
-        
+
         Args:
             **kwargs: Tool-specific parameters.
-        
+
         Returns:
             String result of the tool execution.
         """

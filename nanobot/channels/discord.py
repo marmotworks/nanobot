@@ -1,19 +1,19 @@
 """Discord channel implementation using Discord Gateway websocket."""
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
 
 import httpx
-import websockets
 from loguru import logger
+import websockets
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import DiscordConfig
-
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
@@ -283,10 +283,8 @@ class DiscordChannel(BaseChannel):
             url = f"{DISCORD_API_BASE}/channels/{channel_id}/typing"
             headers = {"Authorization": f"Bot {self.config.token}"}
             while self._running:
-                try:
+                with contextlib.suppress(Exception):
                     await self._http.post(url, headers=headers)
-                except Exception:
-                    pass
                 await asyncio.sleep(8)
 
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())

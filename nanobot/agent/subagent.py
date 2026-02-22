@@ -2,20 +2,20 @@
 
 import asyncio
 import json
-import uuid
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+import uuid
 
 from loguru import logger
 
+from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.providers.registry import list_models, find_by_class_name
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
+from nanobot.providers.registry import list_models
 
 if TYPE_CHECKING:
     from nanobot.config.schema import Config, ExecToolConfig
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 class SubagentManager:
     """
     Manages background subagent execution.
-    
+
     Subagents are lightweight agent instances that run in the background
     to handle specific tasks. They can use a different provider/model than
     the main agent (e.g. a local LM Studio model for vision tasks).
@@ -169,7 +169,7 @@ class SubagentManager:
                 )
             except Exception as e:
                 logger.error("SubagentManager: list_models() failed: {}", e)
-                error_msg = f"Error: Failed to fetch available models from provider: {str(e)}"
+                error_msg = f"Error: Failed to fetch available models from provider: {e!s}"
                 return error_msg
 
             # Handle None or empty list from list_models
@@ -259,7 +259,8 @@ class SubagentManager:
 
             # Build the user message — embed image as base64 if provided
             if image_path:
-                import base64, mimetypes
+                import base64
+                import mimetypes
                 mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
                 with open(image_path, "rb") as f:
                     image_b64 = base64.b64encode(f.read()).decode()
@@ -333,7 +334,7 @@ class SubagentManager:
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
         except Exception as e:
-            error_msg = f"Error: {str(e)}"
+            error_msg = f"Error: {e!s}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
 

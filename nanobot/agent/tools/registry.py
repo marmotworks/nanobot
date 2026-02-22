@@ -69,7 +69,7 @@ class ToolRegistry:
             result = await tool.execute(**params)
             return result
         except Exception as e:
-            error_msg = f"Error executing {name}: {str(e)}"
+            error_msg = f"Error executing {name}: {e!s}"
             if self.failure_tracker:
                 self.failure_tracker.record_failure(name, error_msg)
             return error_msg

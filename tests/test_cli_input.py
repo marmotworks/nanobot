@@ -1,8 +1,8 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from prompt_toolkit.formatted_text import HTML
+import pytest
 
 from nanobot.cli import commands
 

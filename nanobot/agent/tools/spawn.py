@@ -1,7 +1,6 @@
 """Spawn tool for creating background subagents."""
 
-from typing import Any, TYPE_CHECKING
-from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 

@@ -59,7 +59,7 @@ class ReadFileTool(Tool):
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
-            return f"Error reading file: {str(e)}"
+            return f"Error reading file: {e!s}"
 
 
 class WriteFileTool(Tool):
@@ -103,7 +103,7 @@ class WriteFileTool(Tool):
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
-            return f"Error writing file: {str(e)}"
+            return f"Error writing file: {e!s}"
 
 
 class EditFileTool(Tool):
@@ -165,7 +165,7 @@ class EditFileTool(Tool):
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
-            return f"Error editing file: {str(e)}"
+            return f"Error editing file: {e!s}"
 
     @staticmethod
     def _not_found_message(old_text: str, content: str, path: str) -> str:
@@ -238,4 +238,4 @@ class ListDirTool(Tool):
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
-            return f"Error listing directory: {str(e)}"
+            return f"Error listing directory: {e!s}"

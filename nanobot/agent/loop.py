@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
-from contextlib import AsyncExitStack
-from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -22,15 +21,18 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
-from nanobot.policy_manager import PolicyManager
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
+from nanobot.policy_manager import PolicyManager
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+    from pathlib import Path
+
+    from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import ExecToolConfig
     from nanobot.cron.service import CronService
+    from nanobot.providers.base import LLMProvider
 
 
 class AgentLoop:
@@ -61,7 +63,7 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
-        config: "Any | None" = None,
+        config: object | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -98,7 +100,7 @@ class AgentLoop:
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
-        self._mcp_stack: AsyncExitStack | None = None
+        self._mcp_stack: contextlib.AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
@@ -132,34 +134,29 @@ class AgentLoop:
         self._mcp_connecting = True
         from nanobot.agent.tools.mcp import connect_mcp_servers
         try:
-            self._mcp_stack = AsyncExitStack()
+            self._mcp_stack = contextlib.AsyncExitStack()
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
             self._mcp_connected = True
         except Exception as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
-                try:
+                with contextlib.suppress(Exception):
                     await self._mcp_stack.aclose()
-                except Exception:
-                    pass
                 self._mcp_stack = None
         finally:
             self._mcp_connecting = False
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.set_context(channel, chat_id, message_id)
+        if (message_tool := self.tools.get("message")) and isinstance(message_tool, MessageTool):
+            message_tool.set_context(channel, chat_id, message_id)
 
-        if spawn_tool := self.tools.get("spawn"):
-            if isinstance(spawn_tool, SpawnTool):
-                spawn_tool.set_context(channel, chat_id)
+        if (spawn_tool := self.tools.get("spawn")) and isinstance(spawn_tool, SpawnTool):
+            spawn_tool.set_context(channel, chat_id)
 
-        if cron_tool := self.tools.get("cron"):
-            if isinstance(cron_tool, CronTool):
-                cron_tool.set_context(channel, chat_id)
+        if (cron_tool := self.tools.get("cron")) and isinstance(cron_tool, CronTool):
+            cron_tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -271,18 +268,16 @@ class AgentLoop:
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel,
                         chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {str(e)}"
+                        content=f"Sorry, I encountered an error: {e!s}"
                     ))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
         if self._mcp_stack:
-            try:
+            with contextlib.suppress(RuntimeError, BaseExceptionGroup):
                 await self._mcp_stack.aclose()
-            except (RuntimeError, BaseExceptionGroup):
-                pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
 
     def stop(self) -> None:
@@ -335,7 +330,8 @@ class AgentLoop:
                 temp.messages = messages_to_archive
                 await self._consolidate_memory(temp, archive_all=True)
 
-            asyncio.create_task(_consolidate_and_cleanup())
+            task = asyncio.create_task(_consolidate_and_cleanup())
+            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
@@ -351,12 +347,12 @@ class AgentLoop:
                 finally:
                     self._consolidating.discard(session.key)
 
-            asyncio.create_task(_consolidate_and_unlock())
+            unlock_task = asyncio.create_task(_consolidate_and_unlock())
+            unlock_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
+        if (message_tool := self.tools.get("message")) and isinstance(message_tool, MessageTool):
+            message_tool.start_turn()
 
         initial_messages = self.context.build_messages(
             history=session.get_history(max_messages=self.memory_window),
@@ -387,9 +383,12 @@ class AgentLoop:
                             tools_used=tools_used if tools_used else None)
         self.sessions.save(session)
 
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-                return None
+        if (
+            (message_tool := self.tools.get("message"))
+            and isinstance(message_tool, MessageTool)
+            and message_tool._sent_in_turn
+        ):
+            return None
 
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,

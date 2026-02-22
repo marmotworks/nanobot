@@ -7,8 +7,6 @@ available to the agent's context so it can learn from mistakes.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
-from pathlib import Path
 
 
 @dataclass
@@ -35,7 +33,7 @@ class FailureTracker:
             max_records: Maximum number of failure records to keep
         """
         self.max_records = max_records
-        self.failures: Dict[str, FailureRecord] = {}  # tool_name -> FailureRecord
+        self.failures: dict[str, FailureRecord] = {}  # tool_name -> FailureRecord
 
     def record_failure(self, tool_name: str, error_message: str) -> None:
         """
@@ -65,7 +63,7 @@ class FailureTracker:
             )
             self.failures = dict(sorted_failures[-self.max_records:])
 
-    def get_failed_commands(self) -> List[str]:
+    def get_failed_commands(self) -> list[str]:
         """
         Get formatted list of failed commands for inclusion in prompts.
 
@@ -110,7 +108,7 @@ class FailureTracker:
         """Clear all failure records."""
         self.failures.clear()
 
-    def get_record(self, tool_name: str) -> Optional[FailureRecord]:
+    def get_record(self, tool_name: str) -> FailureRecord | None:
         """Get a specific failure record."""
         return self.failures.get(tool_name)
 

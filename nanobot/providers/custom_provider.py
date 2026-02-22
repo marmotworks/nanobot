@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import json_repair
 from openai import AsyncOpenAI
-import httpx
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 

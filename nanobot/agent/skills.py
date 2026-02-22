@@ -2,9 +2,9 @@
 
 import json
 import os
+from pathlib import Path
 import re
 import shutil
-from pathlib import Path
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -13,7 +13,7 @@ BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 class SkillsLoader:
     """
     Loader for agent skills.
-    
+
     Skills are markdown files (SKILL.md) that teach the agent how to use
     specific tools or perform certain tasks.
     """
@@ -26,10 +26,10 @@ class SkillsLoader:
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
         List all available skills.
-        
+
         Args:
             filter_unavailable: If True, filter out skills with unmet requirements.
-        
+
         Returns:
             List of skill info dicts with 'name', 'path', 'source'.
         """
@@ -59,10 +59,10 @@ class SkillsLoader:
     def load_skill(self, name: str) -> str | None:
         """
         Load a skill by name.
-        
+
         Args:
             name: Skill name (directory name).
-        
+
         Returns:
             Skill content or None if not found.
         """
@@ -82,10 +82,10 @@ class SkillsLoader:
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
         Load specific skills for inclusion in agent context.
-        
+
         Args:
             skill_names: List of skill names to load.
-        
+
         Returns:
             Formatted skills content.
         """
@@ -101,10 +101,10 @@ class SkillsLoader:
     def build_skills_summary(self) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
-        
+
         This is used for progressive loading - the agent can read the full
         skill content using read_file when needed.
-        
+
         Returns:
             XML-formatted skills summary.
         """
@@ -134,7 +134,7 @@ class SkillsLoader:
                 if missing:
                     lines.append(f"    <requires>{escape_xml(missing)}</requires>")
 
-            lines.append(f"  </skill>")
+            lines.append("  </skill>")
         lines.append("</skills>")
 
         return "\n".join(lines)
@@ -180,10 +180,7 @@ class SkillsLoader:
         for b in requires.get("bins", []):
             if not shutil.which(b):
                 return False
-        for env in requires.get("env", []):
-            if not os.environ.get(env):
-                return False
-        return True
+        return all(os.environ.get(env) for env in requires.get("env", []))
 
     def _get_skill_meta(self, name: str) -> dict:
         """Get nanobot metadata for a skill (cached in frontmatter)."""
@@ -203,10 +200,10 @@ class SkillsLoader:
     def get_skill_metadata(self, name: str) -> dict | None:
         """
         Get metadata from a skill's frontmatter.
-        
+
         Args:
             name: Skill name.
-        
+
         Returns:
             Metadata dict or None.
         """
