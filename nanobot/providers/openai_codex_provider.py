@@ -7,14 +7,14 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
 import httpx
 from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "nanobot"
