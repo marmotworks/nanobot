@@ -52,20 +52,15 @@ class CustomProvider(LLMProvider):
         Query LM Studio v0 REST API for model metadata including context length.
         Returns a list of model info with rich metadata.
         """
-        # LM Studio v0 API endpoint
+        # LM Studio v0 API endpoint — use self.api_base (stored by base class) to avoid
+        # recovering the URL from the OpenAI client, which may mangle it internally.
         import urllib.parse
-        base_url = str(self._client.base_url).rstrip('/')
+        base_url = (self.api_base or "http://localhost:1234/v1").rstrip('/')
         parsed = urllib.parse.urlparse(base_url)
 
-        # Check if the path already ends with /api/v0 or /api/v0/
-        path = parsed.path
-        if path.endswith('/api/v0') or path.endswith('/api/v0/'):
-            # Already has the v0 API path, just add /models
-            v0_api_url = urllib.parse.urlunparse(parsed._replace(path=f"{path.rstrip('/')}/models"))
-        else:
-            # Add /api/v0/models to the path
-            v0_api_url = urllib.parse.urlunparse(parsed._replace(path=f"{path.rstrip('/')}/api/v0/models"))
-        headers = {"Authorization": f"Bearer {self._client.api_key}"}
+        # Always construct v0 URL from scheme + host only (v0 API is at root, not under /v1)
+        v0_api_url = f"{parsed.scheme}://{parsed.netloc}/api/v0/models"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
 
         try:
             async with httpx.AsyncClient() as client:
