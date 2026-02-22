@@ -281,6 +281,7 @@ This file stores important information that should persist across sessions.
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    from nanobot.providers.bedrock_provider import BedrockProvider
     from nanobot.providers.custom_provider import CustomProvider
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
@@ -288,6 +289,11 @@ def _make_provider(config: Config):
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
+
+    # Bedrock (direct, bypasses LiteLLM)
+    if provider_name == "bedrock":
+        region = p.api_base if p and p.api_base else "us-east-1"
+        return BedrockProvider(region_name=region, default_model=model)
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):

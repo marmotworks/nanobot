@@ -81,6 +81,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_direct=True,
     ),
 
+    # === AWS Bedrock (direct, bypasses LiteLLM) ============================
+    ProviderSpec(
+        name="bedrock",
+        keywords=("bedrock", "us.anthropic.claude", "anthropic.claude"),
+        env_key="",
+        display_name="AWS Bedrock",
+        litellm_prefix="",
+        is_direct=True,
+    ),
+
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
 

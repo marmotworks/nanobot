@@ -12,9 +12,11 @@ A step-by-step checklist for auditing backlog health.
 
 4. **Status drift** — If all milestones for a task are `[x]`, the task status should be "Complete ✅". Fix any that aren't.
 
-5. **Blocked tasks** — Verify the blocker still applies. If the blocking task is complete, unblock.
+5. **Unclosed completed tasks** — Any task with status "Complete ✅" that still appears in the active section must be closed out: announce on Discord, move a summary entry to `## Completed`, remove the full block from the active section. Follow the **Close Out** workflow in `SKILL.md`.
 
-6. **Milestone criterion quality** — Spot-check 2-3 milestones. Each must have: a runnable command, an expected output, and a single file. Flag any that are vague.
+6. **Blocked tasks** — Verify the blocker still applies. If the blocking task is complete, unblock.
+
+7. **Milestone criterion quality** — Spot-check 2-3 milestones. Each must have: a runnable command, an expected output, and a single file. Flag any that are vague.
 
 ## Summary
 

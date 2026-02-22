@@ -20,6 +20,22 @@ Read `references/triage-checklist.md` and follow it step by step. Do not skip st
 
 Read `references/review-checklist.md` and follow it step by step. Do not skip steps.
 
+### Close Out (task completion)
+
+When all milestones for a task are `[x]` and the work is committed:
+
+1. **Announce on Discord** — send a brief completion message to channel `discord`, chat ID `1475026411193499792`. Include task title and what was delivered.
+2. **Update task status** — set `**Status**: Complete ✅` in BACKLOG.md.
+3. **Move to Completed section** — cut the entire task block (header + goal + milestones) from the active section and paste a summary entry under `## Completed` at the bottom of BACKLOG.md. Format:
+   ```
+   ### Task N: Title ✅
+   - One-line summary of what was delivered
+   - Commit hash if applicable
+   ```
+4. **Verify** — run `status.py` and confirm the task no longer appears in the active list.
+
+Do NOT leave completed tasks in the active section. Do NOT skip the Discord announcement.
+
 ### Cron Dispatch
 
 Follow two-phase dispatch:
