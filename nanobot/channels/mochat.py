@@ -20,7 +20,9 @@ from nanobot.config.schema import MochatConfig
 from nanobot.utils.helpers import get_data_path
 
 if TYPE_CHECKING:
-    ...
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import MochatConfig
 
 try:
     import socketio
