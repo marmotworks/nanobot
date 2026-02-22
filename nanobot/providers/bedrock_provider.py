@@ -7,6 +7,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import boto3
+from loguru import logger
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -82,7 +83,113 @@ class BedrockProvider(LLMProvider):
                     "content": [{"text": content}],
                 })
 
-        return bedrock_messages, system_prompts
+        return self._sanitize_bedrock_messages(bedrock_messages), system_prompts
+
+    def _sanitize_bedrock_messages(
+        self,
+        bedrock_messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Sanitize Bedrock messages to remove unpaired toolUse/toolResult pairs.
+
+        Bedrock requires that every assistant message containing toolUse blocks
+        must be immediately followed by a user message containing toolResult blocks
+        covering ALL tool use IDs. This method removes unpaired toolUse messages
+        and any orphaned toolResult messages.
+
+        Args:
+            bedrock_messages: List of converted Bedrock message dicts.
+
+        Returns:
+            Sanitized list of Bedrock messages.
+        """
+        if not bedrock_messages:
+            return bedrock_messages
+
+        # Pass 1: Identify assistant+toolUse messages that need removal
+        # A toolUse at the end of the list (no following message) is VALID and must be kept.
+        # A toolUse followed by a non-user message is INVALID and must be stripped.
+        # A toolUse followed by a user message without ALL matching toolResult IDs is INVALID and must be stripped.
+        assistant_to_remove: set[int] = set()
+        orphaned_tool_result_ids: set[str] = set()
+
+        for idx, msg in enumerate(bedrock_messages):
+            if msg.get("role") != "assistant":
+                continue
+
+            # Check if this assistant message has toolUse blocks
+            content = msg.get("content", [])
+            tool_use_ids: set[str] = set()
+            for block in content:
+                if "toolUse" in block:
+                    tool_use_ids.add(block["toolUse"].get("toolUseId", ""))
+
+            if not tool_use_ids:
+                continue  # No toolUse blocks, skip
+
+            # Check if the immediately next message is a user message with ALL toolResult blocks
+            next_idx = idx + 1
+
+            # If there's no next message, the toolUse is valid (results may follow in actual usage)
+            if next_idx >= len(bedrock_messages):
+                continue  # Keep toolUse at end
+
+            next_msg = bedrock_messages[next_idx]
+
+            # If next message is not a user message, this toolUse is invalid
+            if next_msg.get("role") != "user":
+                assistant_to_remove.add(idx)
+                orphaned_tool_result_ids.update(tool_use_ids)
+                continue
+
+            # Next message is a user message - check if it has ALL toolResult blocks
+            next_content = next_msg.get("content", [])
+            result_ids_in_next: set[str] = set()
+            for block in next_content:
+                if "toolResult" in block:
+                    result_ids_in_next.add(block["toolResult"].get("toolUseId", ""))
+            # Check if all toolUse IDs are covered
+            if result_ids_in_next >= tool_use_ids:
+                continue  # Valid pair, keep both
+
+            # User message exists but doesn't have all toolResult blocks - invalid
+            assistant_to_remove.add(idx)
+            orphaned_tool_result_ids.update(tool_use_ids)
+
+        # Pass 2: Build sanitized list, skipping removed assistant messages and orphaned toolResult messages
+        sanitized: list[dict[str, Any]] = []
+        for idx, msg in enumerate(bedrock_messages):
+            # Skip assistant messages marked for removal
+            if idx in assistant_to_remove:
+                content = msg.get("content", [])
+                tool_use_ids: set[str] = set()
+                for block in content:
+                    if "toolUse" in block:
+                        tool_use_ids.add(block["toolUse"].get("toolUseId", ""))
+                if tool_use_ids:
+                    logger.warning("Bedrock: removing unpaired toolUse message with IDs: {}", tool_use_ids)
+                continue
+
+            # Skip user+toolResult messages whose toolUseId references a removed assistant message
+            if msg.get("role") == "user":
+                content = msg.get("content", [])
+                filtered_content = []
+                for block in content:
+                    if "toolResult" in block:
+                        tool_id = block["toolResult"].get("toolUseId", "")
+                        # Only keep this toolResult if it corresponds to a non-removed assistant message
+                        tool_result_kept = tool_id not in orphaned_tool_result_ids
+                        if tool_result_kept:
+                            filtered_content.append(block)
+                    else:
+                        filtered_content.append(block)
+                msg = {**msg, "content": filtered_content}
+                # Skip the entire user message if it has no content left
+                if not msg["content"]:
+                    continue
+
+            sanitized.append(msg)
+
+        return sanitized
 
     def _convert_tools(
         self,

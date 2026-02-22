@@ -189,9 +189,10 @@ class AgentLoop:
         temperature: float,
         max_tokens: int,
     ):
-        """Call provider.chat(), falling back to local glm-4.7-flash on rate limit or auth errors."""
+        """Call provider.chat(), falling back through multiple tiers on rate limit or auth errors."""
         from nanobot.providers.base import LLMResponse
 
+        # Tier 1: Primary provider
         response = await self.provider.chat(
             messages=messages,
             tools=tools,
@@ -211,6 +212,15 @@ class AgentLoop:
         )
 
         if is_fallback_error:
+            # Skip fallback if primary is already BedrockProvider to avoid infinite loop
+            provider_name = self.provider.__class__.__name__
+            if provider_name == "BedrockProvider":
+                logger.warning(
+                    "Primary provider is BedrockProvider, skipping fallback: {}", content[:120]
+                )
+                return response
+
+            # Tier 2: Local CustomProvider with glm-4.7-flash
             logger.warning(
                 "Primary provider error — falling back to local glm-4.7-flash: {}", content[:120]
             )
@@ -231,11 +241,32 @@ class AgentLoop:
                 )
                 logger.info("Fallback to glm-4.7-flash succeeded")
             except Exception as e:
-                logger.error("Fallback provider also failed: {}", e)
-                return LLMResponse(
-                    content=f"Both primary and fallback providers failed: {e}",
-                    finish_reason="error",
+                logger.error("Tier 2 fallback provider also failed: {}", e)
+                # Tier 3: AWS Bedrock with claude-sonnet-4-6
+                logger.warning(
+                    "Tier 2 fallback failed — falling back to AWS Bedrock (us.anthropic.claude-sonnet-4-6)"
                 )
+                try:
+                    from nanobot.providers.bedrock_provider import BedrockProvider
+
+                    fallback = BedrockProvider(
+                        region_name="us-east-1",
+                        default_model="us.anthropic.claude-sonnet-4-6",
+                    )
+                    response = await fallback.chat(
+                        messages=messages,
+                        tools=tools,
+                        model="us.anthropic.claude-sonnet-4-6",
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                    logger.info("Fallback to AWS Bedrock succeeded")
+                except Exception as e2:
+                    logger.error("Tier 3 fallback also failed: {}", e2)
+                    return LLMResponse(
+                        content=f"All three providers failed: Tier1 error; Tier2: {e}; Tier3: {e2}",
+                        finish_reason="error",
+                    )
 
         return response
 

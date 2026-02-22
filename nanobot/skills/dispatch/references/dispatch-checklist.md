@@ -7,9 +7,11 @@ Follow every step in order. Do not skip any step. Do not proceed to the next ste
 Read `~/.nanobot/workspace/memory/BACKLOG.md`.
 
 A milestone is **ready** if ALL of the following are true:
-- Its marker is `[ ]` (not `[x]` and not `[~]`)
+- Its marker is `[ ]` — milestones marked `[~]` (in-progress) or `[x]` (complete) must be **skipped**
 - Its `Blocker:` field is `none` OR the referenced milestone is already `[x]`
 - Its parent task is not marked `Blocked` or `Complete`
+
+**Before selecting a milestone, scan for any `[~]` markers. If found, run `verify_dispatch.py` to check for stale markers before proceeding.**
 
 Select the first ready milestone found. If none are ready, stop — report "No ready milestones."
 

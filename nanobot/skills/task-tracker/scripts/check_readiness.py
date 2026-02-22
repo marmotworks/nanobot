@@ -12,7 +12,7 @@ import os
 import re
 import sys
 
-BACKLOG_PATH = os.path.expanduser("~/.nanobot/workspace/memory/BACKLOG.md")
+BACKLOG_PATH = os.environ.get("BACKLOG_PATH", os.path.expanduser("~/.nanobot/workspace/memory/BACKLOG.md"))
 
 
 def read_backlog() -> str:

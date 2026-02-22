@@ -334,7 +334,7 @@ class TestChatWithFallback:
 
     @pytest.mark.asyncio
     async def test_fallback_also_fails(self):
-        """Primary triggers fallback, fallback raises Exception, returns failure response."""
+        """Primary triggers fallback, fallback raises Exception, Bedrock fallback also fails, returns failure response."""
         mock_bus = MagicMock(spec=MessageBus)
         mock_provider = AsyncMock()
         mock_provider.chat.return_value = LLMResponse(
@@ -383,17 +383,26 @@ class TestChatWithFallback:
             mock_fallback = AsyncMock()
             mock_fallback.chat.side_effect = Exception("Fallback provider connection failed")
 
-            with patch(
-                "nanobot.providers.custom_provider.CustomProvider", return_value=mock_fallback
+            mock_bedrock_fallback = AsyncMock()
+            mock_bedrock_fallback.chat.side_effect = Exception("Bedrock provider connection failed")
+
+            with (
+                patch(
+                    "nanobot.providers.custom_provider.CustomProvider", return_value=mock_fallback
+                ),
+                patch(
+                    "nanobot.providers.bedrock_provider.BedrockProvider", return_value=mock_bedrock_fallback
+                ),
             ):
                 result = await agent._chat_with_fallback(
                     messages, tools, model, temperature, max_tokens
                 )
 
-                assert "Both primary and fallback providers failed:" in result.content
+                assert "All three providers failed:" in result.content
                 assert result.finish_reason == "error"
                 mock_provider.chat.assert_called_once()
                 mock_fallback.chat.assert_called_once()
+                mock_bedrock_fallback.chat.assert_called_once()
 
 
 class TestChatWithFallbackIntegration:
