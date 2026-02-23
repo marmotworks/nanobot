@@ -262,7 +262,7 @@ class TestTagInAtomic:
 
 @pytest.mark.integration
 async def test_capacity_enforcement(tmp_path) -> None:
-    """Spawning a 4th subagent when 3 are running raises RuntimeError with 'capacity'."""
+    """Spawning a 4th subagent when 3 are running returns a capacity error string."""
     # Create mocks for provider and bus
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -282,14 +282,14 @@ async def test_capacity_enforcement(tmp_path) -> None:
 
     manager._run_subagent = AsyncMock(side_effect=sleep_forever)
 
-    # Manually tag in 3 tasks to simulate capacity being full
-    manager.registry.tag_in("task1", "test task 1", "user")
-    manager.registry.tag_in("task2", "test task 2", "user")
-    manager.registry.tag_in("task3", "test task 3", "user")
+    # Manually tag in 3 tasks atomically to simulate capacity being full
+    manager.registry.tag_in_atomic("task1", "test task 1", "user")
+    manager.registry.tag_in_atomic("task2", "test task 2", "user")
+    manager.registry.tag_in_atomic("task3", "test task 3", "user")
 
     # Verify we have 3 running tasks
     assert manager.registry.get_running_count() == 3
 
-    # Spawn a 4th time - should raise RuntimeError with "capacity" in message
-    with pytest.raises(RuntimeError, match="capacity"):
-        await manager.spawn("test task 4")
+    # Spawn a 4th time - should return error string containing "capacity"
+    result = await manager.spawn("test task 4")
+    assert "capacity" in result.lower()

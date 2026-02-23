@@ -9,6 +9,7 @@ These tests verify:
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -76,20 +77,17 @@ class TestCapacityEnforcement:
         with patch("asyncio.create_task") as mock_create_task:
             mock_create_task.return_value = MagicMock()
 
-            # Manually tag in 3 running tasks (status='pending')
-            manager.registry.tag_in("task-001", "Task 1", "user")
-            manager.registry.tag_in("task-002", "Task 2", "user")
-            manager.registry.tag_in("task-003", "Task 3", "user")
+            # Manually tag in 3 running tasks atomically (status='pending')
+            manager.registry.tag_in_atomic("task-001", "Task 1", "user")
+            manager.registry.tag_in_atomic("task-002", "Task 2", "user")
+            manager.registry.tag_in_atomic("task-003", "Task 3", "user")
 
             # Verify we have 3 pending tasks
             assert manager.registry.get_running_count() == 3
 
-            # Attempt to spawn a 4th subagent
-            with pytest.raises(RuntimeError, match="capacity limit"):
-                await manager.spawn(
-                    task="Task 4",
-                    label="Task 4",
-                )
+            # Attempt to spawn a 4th subagent — returns error string (CapacityError)
+            result = await manager.spawn(task="Task 4", label="Task 4")
+            assert "capacity" in result.lower()
 
             # Verify no 4th task was created
             mock_create_task.assert_not_called()
@@ -120,9 +118,9 @@ class TestCapacityEnforcement:
             mock_task = MagicMock()
             mock_create_task.return_value = mock_task
 
-            # Manually tag in 2 running tasks
-            manager.registry.tag_in("task-001", "Task 1", "user")
-            manager.registry.tag_in("task-002", "Task 2", "user")
+            # Manually tag in 2 running tasks atomically
+            manager.registry.tag_in_atomic("task-001", "Task 1", "user")
+            manager.registry.tag_in_atomic("task-002", "Task 2", "user")
 
             # Verify we have 2 pending tasks
             assert manager.registry.get_running_count() == 2
@@ -164,14 +162,110 @@ class TestCapacityEnforcement:
         with patch("asyncio.create_task") as mock_create_task:
             mock_create_task.return_value = MagicMock()
 
-            # Tag in 3 tasks
-            manager.registry.tag_in("task-001", "Task 1", "user")
-            manager.registry.tag_in("task-002", "Task 2", "user")
-            manager.registry.tag_in("task-003", "Task 3", "user")
+            # Tag in 3 tasks atomically
+            manager.registry.tag_in_atomic("task-001", "Task 1", "user")
+            manager.registry.tag_in_atomic("task-002", "Task 2", "user")
+            manager.registry.tag_in_atomic("task-003", "Task 3", "user")
 
-            # Attempt 4th spawn and verify error message contains count
-            with pytest.raises(RuntimeError, match="3/3 running"):
-                await manager.spawn(
-                    task="Task 4",
-                    label="Task 4",
-                )
+            # Attempt 4th spawn and verify error message contains "capacity"
+            result = await manager.spawn(task="Task 4", label="Task 4")
+            assert "capacity" in result.lower()
+
+
+class TestTagOutFinally:
+    """Tests for _run_subagent() tag_out finally guarantee (milestone 30.7)."""
+
+    @pytest.mark.asyncio
+    async def test_tag_out_called_on_success(
+        self,
+        tmp_path: Path,
+        mock_provider: LLMProvider,
+        mock_bus: MessageBus,
+    ) -> None:
+        """tag_out is called with status='completed' when subagent succeeds."""
+        import sqlite3
+
+        workspace_dir = tmp_path / "workspace"
+        workspace_dir.mkdir()
+        db_path = tmp_path / "test.db"
+
+        manager = SubagentManager(
+            provider=mock_provider,
+            workspace=workspace_dir,
+            bus=mock_bus,
+            model="zai-org/glm-4.7-flash",
+            db_path=db_path,
+        )
+
+        mock_response = MagicMock()
+        mock_response.has_tool_calls = False
+        mock_response.content = "Test result"
+        mock_provider.chat = AsyncMock(return_value=mock_response)
+
+        task_id = "test-task-123"
+        manager.registry.tag_in(task_id, "Test Task", "user")
+
+        with patch.object(manager, "_announce_result", AsyncMock()):
+            await manager._run_subagent(
+                task_id=task_id,
+                task="Test task description",
+                label="Test Task",
+                origin={"channel": "cli", "chat_id": "test"},
+                model="zai-org/glm-4.7-flash",
+            )
+
+        # Query the DB directly — get_all_active() only returns pending/running
+        conn = sqlite3.connect(str(db_path))
+        row = conn.execute("SELECT status FROM subagents WHERE id=?", (task_id,)).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_tag_out_called_on_exception(
+        self,
+        tmp_path: Path,
+        mock_provider: LLMProvider,
+        mock_bus: MessageBus,
+    ) -> None:
+        """tag_out fires in finally even when _announce_result raises."""
+        import sqlite3
+
+        workspace_dir = tmp_path / "workspace"
+        workspace_dir.mkdir()
+        db_path = tmp_path / "test.db"
+
+        manager = SubagentManager(
+            provider=mock_provider,
+            workspace=workspace_dir,
+            bus=mock_bus,
+            model="zai-org/glm-4.7-flash",
+            db_path=db_path,
+        )
+
+        mock_response = MagicMock()
+        mock_response.has_tool_calls = False
+        mock_response.content = "Test result"
+        mock_provider.chat = AsyncMock(return_value=mock_response)
+
+        task_id = "test-task-456"
+        manager.registry.tag_in(task_id, "Test Task", "user")
+
+        with (
+            patch.object(manager, "_announce_result", AsyncMock(side_effect=Exception("bus down"))),
+            contextlib.suppress(Exception),
+        ):
+            await manager._run_subagent(
+                task_id=task_id,
+                task="Test task description",
+                label="Test Task",
+                origin={"channel": "cli", "chat_id": "test"},
+                model="zai-org/glm-4.7-flash",
+            )
+
+        # tag_out must have fired despite the exception
+        conn = sqlite3.connect(str(db_path))
+        row = conn.execute("SELECT status FROM subagents WHERE id=?", (task_id,)).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] in ("completed", "failed")

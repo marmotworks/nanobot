@@ -640,6 +640,9 @@ Use the edit_file tool to make this change. Do this as your final step before re
                     ready_milestone_num,
                     spawn_result[:100] + "..." if len(spawn_result) > 100 else spawn_result,
                 )
+                # Rollback [~] marker if spawn failed
+                if self._is_spawn_error(spawn_result):
+                    await self._rollback_milestone_marker(ready_milestone_num)
             elif output.strip() == "NONE" or "NONE" in lines:
                 logger.info("No ready milestones found by dispatch script")
             else:
@@ -650,6 +653,63 @@ Use the edit_file tool to make this change. Do this as your final step before re
 
         except Exception as e:
             logger.error("Failed to run dispatch script: {}", e)
+
+    def _is_spawn_error(self, result: str) -> bool:
+        """Check if spawn() result indicates an error.
+
+        Args:
+            result: The string returned from spawn()
+
+        Returns:
+            True if result is an error string, False otherwise
+        """
+        return result.startswith("Error:")
+
+    async def _rollback_milestone_marker(self, milestone_num: str) -> None:
+        """Rollback [~] marker back to [ ] in BACKLOG.md if spawn failed.
+
+        Args:
+            milestone_num: The milestone number to rollback (e.g., '30.5')
+        """
+        backlog_path = Path.home() / ".nanobot" / "workspace" / "memory" / "BACKLOG.md"
+
+        if not backlog_path.exists():
+            logger.warning(
+                "BACKLOG.md not found at {}, cannot rollback milestone {}",
+                backlog_path,
+                milestone_num,
+            )
+            return
+
+        try:
+            content = backlog_path.read_text()
+        except OSError as e:
+            logger.error("Failed to read BACKLOG.md: {}", e)
+            return
+
+        # Find and replace the first occurrence of [~] for this milestone
+        import re
+
+        pattern = rf"- \[~\] ({re.escape(milestone_num)} )"
+        replacement = f"- [ ] {milestone_num} "
+
+        new_content = re.sub(pattern, replacement, content, count=1)
+
+        if new_content == content:
+            logger.warning(
+                "No [~] marker found for milestone {} in BACKLOG.md, nothing to rollback",
+                milestone_num,
+            )
+            return
+
+        try:
+            backlog_path.write_text(new_content)
+            logger.info(
+                "Rollback milestone {} from [~] to [ ] in BACKLOG.md",
+                milestone_num,
+            )
+        except OSError as e:
+            logger.error("Failed to write BACKLOG.md: {}", e)
 
     def _build_subagent_prompt(self, task: str, template: str | None = None) -> str:
         """Build a focused system prompt for the subagent."""

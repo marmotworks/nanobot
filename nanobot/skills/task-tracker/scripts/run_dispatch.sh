@@ -18,7 +18,10 @@ echo ""
 echo "Checking for ready milestones..."
 
 # Write the Python script to a temp file to avoid quoting issues
-cat > /tmp/find_ready_milestone.py << 'PYTHON_SCRIPT'
+TMPFILE=$(mktemp /tmp/find_ready_milestone_XXXXXX.py)
+trap "rm -f $TMPFILE" EXIT
+
+cat > "$TMPFILE" << 'PYTHON_SCRIPT'
 import sys
 import re
 import sqlite3
@@ -149,7 +152,7 @@ for task in sorted(tasks, key=lambda t: t['number']):
 print('NONE')
 PYTHON_SCRIPT
 
-python3 /tmp/find_ready_milestone.py
+python3 "$TMPFILE"
 result=$?
 
 if [ "$result" -eq 0 ]; then
