@@ -380,6 +380,18 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        if "dispatch" in job.payload.message.lower():
+            # Bypass LLM — run dispatch cycle directly
+            from nanobot.agent.dispatch_runner import dispatch_next
+            result = await dispatch_next(agent.subagents)
+            if result and result.dispatched:
+                from nanobot.bus.events import OutboundMessage
+                await bus.publish_outbound(OutboundMessage(
+                    channel="discord",
+                    chat_id="1475026411193499792",
+                    content=f"🚀 Dispatched milestone {result.milestone_num}: {result.label}",
+                ))
+            return None
         response = await agent.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",
