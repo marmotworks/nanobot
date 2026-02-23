@@ -9,6 +9,27 @@ description: Use this skill whenever dispatching a background subagent for a bac
 - Dispatching any milestone subagent
 - Any time you would call the `spawn` tool for a backlog task
 
+## Phase 1: Planning Subagents
+**Use Phase 1 dispatches when the task has no milestones yet and needs research + milestone breakdown.**
+
+### When to Use Phase 1:
+- Task has no milestones in BACKLOG
+- Requires research, exploration, or planning before execution
+- Goal: produce a list of milestones with citations/sources
+
+### How Phase 1 Differs from Phase 2:
+- Creates milestones (Phase 2 executes existing milestones)
+- No `[~]` BACKLOG marker needed yet (milestones don't exist)
+- Output: milestone list that will be added to BACKLOG
+
+### Capacity Check Still Applies:
+- Consult SubagentRegistry for current capacity (same as Phase 2)
+- Use `verify_dispatch.py` to check active subagents
+- Both Phase 1 and Phase 2 count toward the same capacity limits
+
+## Phase 2: Milestone Execution
+**Use Phase 2 dispatches when milestones already exist in BACKLOG and need execution.**
+
 ## The Dispatch Checklist
 **Always follow `references/dispatch-checklist.md` step by step. No steps are optional.**
 

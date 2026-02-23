@@ -2,7 +2,63 @@
 
 Follow every step in order. Do not skip any step. Do not proceed to the next step until the current one is complete.
 
-## Step 1: Identify the next ready milestone
+## Phase 1: Planning Dispatch
+**Use this checklist when dispatching a planning subagent for a task with no milestones yet.**
+
+### Step 1: Identify task needing planning
+
+Read `~/.nanobot/workspace/memory/BACKLOG.md`.
+
+A task needs Phase 1 planning if:
+- The task exists in BACKLOG but has **no milestones** yet (no numbered items like `1.1`, `1.2`, etc.)
+- The task requires research exploration before concrete milestones can be defined
+
+### Step 2: Write task brief for planning subagent
+
+Write a complete task brief for the planning subagent. The brief must include:
+- The task number and title
+- The goal: "Produce a list of milestones with citations/sources"
+- Any existing context from the task description
+- Expected output format: numbered milestones with brief descriptions and citations
+- Code style requirements (ruff, double quotes, type annotations) if applicable
+
+Do NOT abbreviate the brief. Subagents start with no memory — they need full context.
+
+### Step 3: Check SubagentRegistry capacity
+
+Read from SQLite database or call `verify_dispatch.py` to check:
+- Current number of active subagents
+- Capacity limit (typically 3 concurrent subagents)
+- Ensure spawning a planning subagent won't exceed capacity
+
+### Step 4: Mark task as "Planning in progress" in BACKLOG.md (optional)
+
+Optionally add a note to the task in BACKLOG.md indicating "Planning in progress" to prevent duplicate dispatches. This is not a `[~]` marker (no milestones exist yet).
+
+### Step 5: Spawn planning subagent
+
+Call the `spawn` tool with:
+- `task`: the full task brief from Step 2
+- `label`: `"Planning: <task name>"` (e.g. `"Planning: Task 5 Research"`)
+- `model`: `"qwen3-coder-next"` (always — for technical tasks)
+
+### Step 6: Verify spawn succeeded
+
+Check the return value from `spawn`. If it contains "Error" or "capacity limit":
+- The spawn failed
+- Do NOT proceed with planning task
+
+If the return value contains "started" or a task ID:
+- The spawn succeeded
+- Record the task ID in a note if helpful
+- Done ✅
+
+---
+
+## Phase 2: Milestone Execution Dispatch
+**Use this checklist when dispatching an execution subagent for an existing milestone.**
+
+### Step 1: Identify the next ready milestone
 
 Read `~/.nanobot/workspace/memory/BACKLOG.md`.
 
@@ -15,7 +71,7 @@ A milestone is **ready** if ALL of the following are true:
 
 Select the first ready milestone found. If none are ready, stop — report "No ready milestones."
 
-## Step 2: Write the task brief
+### Step 2: Write the task brief
 
 Write a complete task brief for the milestone. The brief must include:
 - The milestone number and title
@@ -28,7 +84,7 @@ Write a complete task brief for the milestone. The brief must include:
 
 Do NOT abbreviate the brief. Subagents start with no memory — they need full context.
 
-## Step 3: Mark `[~]` in BACKLOG.md — DO THIS BEFORE CALLING SPAWN
+### Step 3: Mark `[~]` in BACKLOG.md — DO THIS BEFORE CALLING SPAWN
 
 Edit `~/.nanobot/workspace/memory/BACKLOG.md` and change the milestone marker from `[ ]` to `[~]`.
 
@@ -36,7 +92,7 @@ Edit `~/.nanobot/workspace/memory/BACKLOG.md` and change the milestone marker fr
 
 Verify the edit was saved by reading the file back and confirming `[~]` is present.
 
-## Step 4: Call the spawn tool
+### Step 4: Call the spawn tool
 
 Call the `spawn` tool with:
 - `task`: the full task brief from Step 2
@@ -45,7 +101,7 @@ Call the `spawn` tool with:
 
 **The spawn tool call MUST appear in the same response as any announcement. Never announce a dispatch without immediately calling the tool.**
 
-## Step 5: Verify the spawn succeeded
+### Step 5: Verify the spawn succeeded
 
 Check the return value from `spawn`. If it contains "Error" or "capacity limit":
 - The spawn failed
@@ -56,7 +112,7 @@ If the return value contains "started" or a task ID:
 - Record the task ID in a note if helpful
 - Done ✅
 
-## Step 6: Handle spawn failure (only if Step 5 failed)
+### Step 6: Handle spawn failure (only if Step 5 failed)
 
 If spawn failed:
 1. Edit BACKLOG.md — reset the milestone marker from `[~]` back to `[ ]`

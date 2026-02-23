@@ -9,20 +9,24 @@ import re
 import sqlite3
 
 
-def parse_backlog(backlog_path: Path) -> list[dict]:
-    """Parse BACKLOG.md and extract in-progress milestones.
+def parse_backlog(backlog_path: Path) -> tuple[list[dict], list[dict]]:
+    """Parse BACKLOG.md and extract in-progress milestones and planning tasks.
 
     Args:
         backlog_path: Path to BACKLOG.md file.
 
     Returns:
-        List of dicts with task_num, task_title, milestone_num,
-        milestone_desc, and optional start_date.
+        Tuple of (milestones, planning_tasks).
+        milestones: List of dicts with task_num, task_title, milestone_num,
+                    milestone_desc, and optional start_date.
+        planning_tasks: List of dicts with task_num, task_title for tasks
+                        marked as "Planning in progress".
     """
     backlog = backlog_path.read_text()
     lines = backlog.split("\n")
 
     milestones: list[dict] = []
+    planning_tasks: list[dict] = []
     current_task_num: int | None = None
     current_task_title: str | None = None
 
@@ -45,7 +49,15 @@ def parse_backlog(backlog_path: Path) -> list[dict]:
                 "start_date": None,
             })
 
-    return milestones
+        # Match planning in progress notes (task-level marker)
+        planning_match = re.match(r"^\s*-\s+Planning in progress", line)
+        if planning_match and current_task_num is not None:
+            planning_tasks.append({
+                "task_num": current_task_num,
+                "task_title": current_task_title or "",
+            })
+
+    return milestones, planning_tasks
 
 
 def format_date(date: datetime | None) -> str:
@@ -68,20 +80,22 @@ def format_date(date: datetime | None) -> str:
     return ", ".join(parts)
 
 
-def query_registry(db_path: Path) -> list[dict]:
+def query_registry(db_path: Path) -> tuple[list[dict], list[dict]]:
     """Query SubagentRegistry for active subagents.
 
     Args:
         db_path: Path to subagents.db SQLite database.
 
     Returns:
-        List of dicts with keys: id, label, status, spawned_at.
-        Returns empty list with warning if DB doesn't exist.
+        Tuple of (all_subagents, planning_subagents).
+        all_subagents: List of dicts with keys: id, label, status, spawned_at.
+        planning_subagents: List of planning subagents (label starts with "Planning:").
+        Returns empty lists with warning if DB doesn't exist.
     """
     if not db_path.exists():
         print(f"Warning: SubagentRegistry DB not found at {db_path}")
         print("Continuing with BACKLOG.md-only verification.\n")
-        return []
+        return [], []
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -92,20 +106,24 @@ def query_registry(db_path: Path) -> list[dict]:
     rows = cursor.fetchall()
     conn.close()
 
-    results: list[dict] = []
+    all_subagents: list[dict] = []
+    planning_subagents: list[dict] = []
     for row in rows:
         id_val, label, status, spawned_at_str = row
         try:
             spawned_at = datetime.fromisoformat(spawned_at_str.replace("Z", "+00:00"))
         except (ValueError, TypeError):
             spawned_at = None
-        results.append({
+        sub = {
             "id": id_val,
             "label": label,
             "status": status,
             "spawned_at": spawned_at,
-        })
-    return results
+        }
+        all_subagents.append(sub)
+        if label.startswith("Planning:"):
+            planning_subagents.append(sub)
+    return all_subagents, planning_subagents
 
 
 def main() -> int:
@@ -117,8 +135,8 @@ def main() -> int:
         print(f"Error: BACKLOG.md not found at {backlog_path}")
         return 1
 
-    milestones = parse_backlog(backlog_path)
-    active_subagents = query_registry(registry_path)
+    milestones, planning_tasks = parse_backlog(backlog_path)
+    active_subagents, planning_subagents = query_registry(registry_path)
 
     # Find STALE milestones (in BACKLOG but no matching subagent)
     stale_milestones: list[dict] = []
@@ -146,6 +164,32 @@ def main() -> int:
         if matched_milestone is None:
             orphaned_subagents.append(sub)
 
+    # Find STALE planning tasks (in BACKLOG but no matching planning subagent)
+    stale_planning_tasks: list[dict] = []
+    matched_planning_tasks: list[tuple[dict, dict]] = []
+    for pt in planning_tasks:
+        matched_planning_subagent = None
+        for sub in planning_subagents:
+            if pt["task_num"] == sub["label"].replace("Planning: Task ", "").split()[0]:
+                # Simple match - task number in label
+                matched_planning_subagent = sub
+                break
+        if matched_planning_subagent:
+            matched_planning_tasks.append((pt, matched_planning_subagent))
+        else:
+            stale_planning_tasks.append(pt)
+
+    # Find ORPHANED planning subagents (active but no matching planning task)
+    orphaned_planning_subagents: list[dict] = []
+    for sub in planning_subagents:
+        matched_planning_task = None
+        for pt in planning_tasks:
+            if pt["task_num"] == sub["label"].replace("Planning: Task ", "").split()[0]:
+                matched_planning_task = pt
+                break
+        if matched_planning_task is None:
+            orphaned_planning_subagents.append(sub)
+
     # Print report
     print("=== Dispatch Verification ===")
     print()
@@ -155,14 +199,25 @@ def main() -> int:
         print(f"  [~] {m['milestone_num']}  {m['milestone_desc']}")
     print()
 
+    print(f"Planning tasks in progress: {len(planning_tasks)}")
+    for pt in planning_tasks:
+        print(f"  Task {pt['task_num']}: {pt['task_title']}")
+    print()
+
     print(f"Active subagents in registry: {len(active_subagents)}")
     for sub in active_subagents:
         spawned_str = format_date(sub["spawned_at"])
         print(f"  {sub['id']} | {sub['label']} | {sub['status']} | spawned {spawned_str}")
     print()
 
+    print(f"Planning subagents: {len(planning_subagents)}")
+    for sub in planning_subagents:
+        spawned_str = format_date(sub["spawned_at"])
+        print(f"  {sub['id']} | {sub['label']} | {sub['status']} | spawned {spawned_str}")
+    print()
+
     print("Issues found:")
-    if not stale_milestones and not orphaned_subagents:
+    if not stale_milestones and not orphaned_subagents and not stale_planning_tasks and not orphaned_planning_subagents:
         print("  ✓ No issues found.")
     else:
         # STALE milestones
@@ -191,11 +246,38 @@ def main() -> int:
             print("Orphaned subagents (active in registry, no [~] in BACKLOG.md):")
             print("  (none)")
 
+        # STALE planning tasks
+        if stale_planning_tasks:
+            print()
+            print("Stale planning tasks (in BACKLOG, no active planning subagent):")
+            for pt in stale_planning_tasks:
+                print(f"  ⚠  STALE: Task {pt['task_num']} — no active planning subagent found")
+        else:
+            print()
+            print("Stale planning tasks (in BACKLOG, no active planning subagent):")
+            print("  (none)")
+
+        # Matched planning tasks
+        if matched_planning_tasks:
+            for pt, sub in matched_planning_tasks:
+                print(f"  ✓  OK: Task {pt['task_num']} — matched to planning subagent {sub['id']}")
+
+        # ORPHANED planning subagents
+        if orphaned_planning_subagents:
+            print()
+            print("Orphaned planning subagents (active in registry, no 'Planning in progress' in BACKLOG.md):")
+            for sub in orphaned_planning_subagents:
+                print(f"  ⚠  ORPHANED: {sub['id']} — {sub['label']}")
+        else:
+            print()
+            print("Orphaned planning subagents (active in registry, no 'Planning in progress' in BACKLOG.md):")
+            print("  (none)")
+
     print()
     print("Run 'status.py' for full backlog overview.")
 
     # Determine exit code
-    if stale_milestones or orphaned_subagents:
+    if stale_milestones or orphaned_subagents or stale_planning_tasks or orphaned_planning_subagents:
         return 1
     return 0
 
