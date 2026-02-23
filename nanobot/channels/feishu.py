@@ -109,6 +109,8 @@ def _extract_interactive_content(content: dict) -> list[str]:
             header_text = header_title.get("content", "") or header_title.get("text", "")
             if header_text:
                 parts.append(f"title: {header_text}")
+        elif isinstance(header_title, str):
+            parts.append(f"title: {header_title}")
 
     return parts
 

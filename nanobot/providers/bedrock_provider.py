@@ -7,6 +7,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import boto3
+from botocore.config import Config as BotocoreConfig
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -25,7 +26,11 @@ class BedrockProvider(LLMProvider):
     ):
         self.region_name = region_name
         self.default_model = default_model
-        self._client = boto3.client("bedrock-runtime", region_name=region_name)
+        self._client = boto3.client(
+            "bedrock-runtime",
+            region_name=region_name,
+            config=BotocoreConfig(read_timeout=300, connect_timeout=30),
+        )
         # Tier-3 fallback chain: models to try if primary fails
         self.fallback_models: list[str] = [
             "us.anthropic.claude-sonnet-4-6",
