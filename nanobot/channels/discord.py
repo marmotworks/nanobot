@@ -4,7 +4,8 @@ import asyncio
 import contextlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+import urllib.parse
 
 import httpx
 from loguru import logger
@@ -60,7 +61,7 @@ class DiscordChannel(BaseChannel):
     """Discord channel using Gateway websocket."""
 
     name = "discord"
-    emoji_registry: dict[str, dict[str, str]] = {
+    emoji_registry: ClassVar[dict[str, dict[str, str]]] = {
         "EXPRESSIVE_TRIGGERS": EXPRESSIVE_TRIGGERS,
         "INTERACTIVE_ACTIONS": INTERACTIVE_ACTIONS,
     }
@@ -191,6 +192,8 @@ class DiscordChannel(BaseChannel):
                 logger.info("Discord gateway READY")
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
+            elif op == 0 and event_type == "MESSAGE_REACTION_ADD":
+                await self._handle_reaction_add(payload)
             elif op == 7:
                 # RECONNECT: exit loop to reconnect
                 logger.info("Discord gateway requested reconnect")
@@ -235,6 +238,25 @@ class DiscordChannel(BaseChannel):
                 await asyncio.sleep(interval_s)
 
         self._heartbeat_task = asyncio.create_task(heartbeat_loop())
+
+    async def _react_to_message(self, channel_id: str, message_id: str, emoji: str) -> None:
+        """Add a reaction to a Discord message."""
+        if not self._http:
+            logger.warning("HTTP client not initialized for reaction")
+            return
+
+        encoded_emoji = urllib.parse.quote(emoji)
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+
+        try:
+            response = await self._http.put(url, headers=headers)
+            if response.status_code == 204:
+                logger.info("Reacted to message {} with emoji {}", message_id, emoji)
+            else:
+                logger.warning("Failed to react to message {}: {}", message_id, response.status_code)
+        except Exception as e:
+            logger.warning("Error adding reaction to message {}: {}", message_id, e)
 
     async def _handle_message_create(self, payload: dict[str, Any]) -> None:
         """Handle incoming Discord messages."""
@@ -281,6 +303,14 @@ class DiscordChannel(BaseChannel):
 
         await self._start_typing(channel_id)
 
+        # Check for expressive triggers and react if found
+        content_lower = content.lower()
+        for trigger, emoji in EXPRESSIVE_TRIGGERS.items():
+            if trigger in content_lower:
+                message_id = str(payload.get("id", ""))
+                await self._react_to_message(channel_id, message_id, emoji)
+                break
+
         await self._handle_message(
             sender_id=sender_id,
             chat_id=channel_id,
@@ -292,6 +322,18 @@ class DiscordChannel(BaseChannel):
                 "reply_to": reply_to,
             },
         )
+
+    async def _handle_reaction_add(self, payload: dict[str, Any]) -> None:
+        """Handle incoming Discord reaction add events."""
+        if payload.get("member", {}).get("user", {}).get("bot"):
+            return
+
+        emoji_name = payload.get("emoji", {}).get("name", "")
+        action = INTERACTIVE_ACTIONS.get(emoji_name)
+        if action is None:
+            return
+
+        logger.info("Interactive reaction: {} → {}", emoji_name, action)
 
     async def _start_typing(self, channel_id: str) -> None:
         """Start periodic typing indicator for a channel."""
