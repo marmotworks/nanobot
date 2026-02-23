@@ -65,6 +65,7 @@ class SubagentManager:
         self.restrict_to_workspace = restrict_to_workspace
         self._config = config  # Full config for resolving per-model providers
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._dispatch_task: asyncio.Task[None] | None = None
         db_path = db_path or Path.home() / ".nanobot" / "workspace" / "subagents.db"
         self.registry = SubagentRegistry(db_path)
         self.registry.open()
@@ -480,6 +481,111 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         logger.debug(
             "Subagent [{}] announced result to {}:{}", task_id, origin["channel"], origin["chat_id"]
         )
+
+        # Trigger dispatch after subagent completion (non-blocking)
+        self._trigger_dispatch()
+
+    def _trigger_dispatch(self) -> None:
+        """Fire-and-forget: run the dispatch script to check for ready backlog milestones."""
+        script_path = self.workspace / "nanobot" / "skills" / "task-tracker" / "scripts" / "run_dispatch.sh"
+        if script_path.exists():
+            self._dispatch_task = asyncio.create_task(self._run_dispatch_script(script_path))
+        else:
+            logger.warning("Dispatch script not found at: {}", script_path)
+
+    async def _run_dispatch_script(self, script_path: Path) -> None:
+        """Run the dispatch script and parse READY/TASK_BRIEF output to spawn subagents."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                str(script_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=60)
+            except TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                logger.warning("Dispatch script timed out after 60 seconds")
+                return
+
+            if proc.returncode != 0:
+                stderr = stderr_bytes.decode()
+                stdout = stdout_bytes.decode()
+                logger.warning(
+                    "Dispatch script exited with code {}: {}",
+                    proc.returncode,
+                    stderr or stdout,
+                )
+                return
+
+            output = stdout_bytes.decode()
+            lines = output.strip().split("\n")
+
+            ready_milestone_num: str | None = None
+            task_brief_lines: list[str] = []
+            in_task_brief = False
+
+            for line in lines:
+                if line.startswith("READY:"):
+                    parts = line.split(":", 2)
+                    if len(parts) >= 2:
+                        ready_milestone_num = parts[1]
+                    in_task_brief = False
+                elif line.startswith("TASK_BRIEF:"):
+                    in_task_brief = True
+                    task_brief_lines = [line[len("TASK_BRIEF:"):]]
+                elif in_task_brief:
+                    # Collect continuation lines until we hit another known prefix or end
+                    if line.startswith("Marked ") or line.startswith("Warning:") or line.startswith("NONE"):
+                        in_task_brief = False
+                    else:
+                        task_brief_lines.append(line)
+
+            task_brief = "\n".join(task_brief_lines).strip() if task_brief_lines else None
+
+            if task_brief is not None and ready_milestone_num is not None:
+                task_brief += f"""
+
+---
+## IMPORTANT: Mark this milestone complete when done
+
+When you have finished the task and verified the criterion passes, update the BACKLOG.md file:
+- File: `/Users/mhall/.nanobot/workspace/memory/BACKLOG.md`
+- Find the line: `- [~] {ready_milestone_num} `
+- Change it to: `- [x] {ready_milestone_num} `
+
+Use the edit_file tool to make this change. Do this as your final step before reporting done.
+"""
+
+            if ready_milestone_num is not None and task_brief is not None:
+                logger.info(
+                    "Dispatch found ready milestone {} with task brief ({} chars)",
+                    ready_milestone_num,
+                    len(task_brief),
+                )
+                spawn_result = await self.spawn(
+                    task=task_brief,
+                    label=ready_milestone_num,
+                    origin_channel="discord",
+                    origin_chat_id="1475026411193499792",
+                    model="qwen3-coder-next",
+                )
+                logger.info(
+                    "Dispatch spawn result for milestone {}: {}",
+                    ready_milestone_num,
+                    spawn_result[:100] + "..." if len(spawn_result) > 100 else spawn_result,
+                )
+            elif output.strip() == "NONE" or "NONE" in lines:
+                logger.info("No ready milestones found by dispatch script")
+            else:
+                logger.warning(
+                    "Dispatch script output did not contain READY/TASK_BRIEF pair: {}",
+                    output[:200] + "..." if len(output) > 200 else output,
+                )
+
+        except Exception as e:
+            logger.error("Failed to run dispatch script: {}", e)
 
     def _build_subagent_prompt(self, task: str) -> str:
         """Build a focused system prompt for the subagent."""

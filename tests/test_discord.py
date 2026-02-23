@@ -2,11 +2,12 @@
 
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from unittest import IsolatedAsyncioTestCase
 
 from nanobot.channels.discord import DiscordChannel
 
 
-class TestDiscordExpressiveTriggers(unittest.TestCase):
+class TestDiscordExpressiveTriggers(IsolatedAsyncioTestCase):
     """Tests for expressive reaction triggers in DiscordChannel."""
 
     def setUp(self) -> None:

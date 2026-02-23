@@ -99,6 +99,8 @@ class AgentLoop:
         self.context_tracker = ContextTracker(provider)
         self.set_context_tracker(self.context_tracker)
 
+        self._config = config
+
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: contextlib.AsyncExitStack | None = None
@@ -129,6 +131,12 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents, policy_manager=self.policy_manager))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        # Register discord_react if a Discord token is available
+        if self._config is not None:
+            token = getattr(getattr(self._config, "discord", None), "token", None)
+            if token:
+                from nanobot.agent.tools.react import DiscordReactTool
+                self.tools.register(DiscordReactTool(token=token))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
