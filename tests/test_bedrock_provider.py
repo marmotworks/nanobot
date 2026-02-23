@@ -361,7 +361,7 @@ class TestBedrockProvider:
                 "us.anthropic.claude-opus-4-6-v1",
             ]
 
-            with pytest.raises(Exception, match="ThrottlingException"):
+            with pytest.raises(Exception) as exc_info:
                 await provider.chat(
                     messages=[{"role": "user", "content": "Hi"}],
                     model="us.anthropic.claude-sonnet-4-6",
@@ -369,6 +369,8 @@ class TestBedrockProvider:
 
             # Both models should have been tried
             assert mock_client.converse.call_count == 2
+            # Verify the last exception is ModelStreamErrorException
+            assert type(exc_info.value).__name__ == "ModelStreamErrorException"
 
     @pytest.mark.asyncio
     async def test_tier3_fallback_non_retryable_error(self):
@@ -392,7 +394,7 @@ class TestBedrockProvider:
                 "us.anthropic.claude-opus-4-6-v1",
             ]
 
-            with pytest.raises(Exception, match="InvalidRequestException"):
+            with pytest.raises(Exception) as exc_info:
                 await provider.chat(
                     messages=[{"role": "user", "content": "Hi"}],
                     model="us.anthropic.claude-sonnet-4-6",
@@ -400,10 +402,16 @@ class TestBedrockProvider:
 
             # Should fail immediately without retrying
             assert mock_client.converse.call_count == 1
+            # Verify the exception is InvalidRequestException
+            assert type(exc_info.value).__name__ == "InvalidRequestException"
 
     @staticmethod
     def _mock_bedrock_exception(exception_name: str, message: str) -> Exception:
         """Create a mock Bedrock exception."""
-        exception = Exception(message)
+
+        class MockBedrockException(Exception):
+            pass
+
+        exception = MockBedrockException(message)
         exception.__class__.__name__ = exception_name
         return exception
