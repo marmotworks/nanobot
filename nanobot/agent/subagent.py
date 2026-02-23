@@ -24,6 +24,41 @@ if TYPE_CHECKING:
     from nanobot.config.schema import Config, ExecToolConfig
     from nanobot.providers.base import LLMProvider
 
+SUBAGENT_TEMPLATES: dict[str, str] = {
+    "code-fixer": """You are a code-fixer subagent. Your task is to debug and fix code issues.
+
+Follow these guidelines:
+- Analyze the code carefully to identify the root cause of the issue
+- Fix the specific issue without introducing new bugs
+- Run tests to verify the fix works correctly
+- Follow ruff code style: use double quotes, include type annotations, and remove unused imports
+- Make minimal changes to achieve the goal""",
+    "code-builder": """You are a code-builder subagent. Your task is to build new features or files from scratch.
+
+Follow these guidelines:
+- Write clean, maintainable code that follows the existing conventions in the codebase
+- Use type annotations throughout
+- Follow ruff code style: use double quotes, include type annotations, and remove unused imports
+- Break down complex tasks into smaller, manageable components
+- Test your implementation to ensure it works as expected""",
+    "planner": """You are a planner subagent. Your task is to research and produce detailed plans.
+
+Follow these guidelines:
+- Research the topic thoroughly before producing a plan
+- Cite sources explicitly when using external information
+- Produce milestone lists with measurable criteria for each milestone
+- Consider dependencies and resource requirements
+- Provide clear success criteria for each planned item""",
+    "researcher": """You are a researcher subagent. Your task is to gather accurate information.
+
+Follow these guidelines:
+- Fetch real URLs to verify facts, not guess or hallucinate
+- Cite sources explicitly for all claims
+- Be thorough and check multiple sources when needed
+- Report findings clearly with source references
+- If information is not available, state that clearly rather than guessing""",
+}
+
 
 class SubagentManager:
     """
@@ -81,7 +116,8 @@ class SubagentManager:
         """
         if self._config is None:
             logger.info(
-                "SubagentManager: No config available, using main provider for model '{}'", model
+                "SubagentManager: No config available, using main provider for model '{}'",
+                model,
             )
             return self.provider
 
@@ -137,7 +173,10 @@ class SubagentManager:
 
         elif provider_name == "bedrock":
             from nanobot.providers.bedrock_provider import BedrockProvider
-            region = getattr(getattr(self._config.providers, "bedrock", None), "region", "us-east-1")
+
+            region = getattr(
+                getattr(self._config.providers, "bedrock", None), "region", "us-east-1"
+            )
             default_model = model
             logger.info(
                 "SubagentManager: Creating BedrockProvider(region='{}') for model='{}'",
@@ -177,6 +216,7 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         model: str | None = None,
         image_path: str | None = None,
+        template: str | None = None,
     ) -> str:
         """
         Spawn a subagent to execute a task in the background.
@@ -274,7 +314,7 @@ class SubagentManager:
 
         # Create background task
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, model, image_path)
+            self._run_subagent(task_id, task, display_label, origin, model, image_path, template)
         )
         self._running_tasks[task_id] = bg_task
 
@@ -297,6 +337,7 @@ class SubagentManager:
         origin: dict[str, str],
         model: str | None = None,
         image_path: str | None = None,
+        template: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("SubagentManager._run_subagent() called for task_id='{}'", task_id)
@@ -336,7 +377,7 @@ class SubagentManager:
             tools.register(WebFetchTool())
 
             # Build messages with subagent-specific prompt
-            system_prompt = self._build_subagent_prompt(task)
+            system_prompt = self._build_subagent_prompt(task, template=template)
 
             # Build the user message — embed image as base64 if provided
             if image_path:
@@ -433,9 +474,23 @@ class SubagentManager:
                     break
 
             if final_result is None:
-                final_result = "Task completed but no final response was generated."
+                # Loop exhausted max_iterations without producing a text response
+                last_content = response.content if "response" in dir() else None
+                logger.warning(
+                    "Subagent [{}] exhausted {} iterations without producing a text response. "
+                    "Last model output: {}",
+                    task_id,
+                    max_iterations,
+                    repr(last_content)[:200] if last_content else "(none)",
+                )
+                final_result = (
+                    f"[INCOMPLETE] Subagent exhausted {max_iterations} iterations without producing "
+                    f"a final response. Last model output: "
+                    f"{repr(last_content)[:300] if last_content else '(none)'}\n\n"
+                    f"The task may be incomplete. Please review and retry if needed."
+                )
 
-            logger.info("Subagent [{}] completed successfully", task_id)
+            logger.info("Subagent [{}] completed with result: {}", task_id, final_result[:100])
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
         except Exception as e:
@@ -453,7 +508,12 @@ class SubagentManager:
         status: str,
     ) -> None:
         """Announce the subagent result to the main agent via the message bus."""
-        status_text = "completed successfully" if status == "ok" else "failed"
+        is_incomplete = result.startswith("[INCOMPLETE]")
+        status_text = (
+            "failed"
+            if status != "ok"
+            else ("completed (incomplete)" if is_incomplete else "completed successfully")
+        )
 
         announce_content = f"""[Subagent '{label}' {status_text}]
 
@@ -487,7 +547,9 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
 
     def _trigger_dispatch(self) -> None:
         """Fire-and-forget: run the dispatch script to check for ready backlog milestones."""
-        script_path = self.workspace / "nanobot" / "skills" / "task-tracker" / "scripts" / "run_dispatch.sh"
+        script_path = (
+            self.workspace / "nanobot" / "skills" / "task-tracker" / "scripts" / "run_dispatch.sh"
+        )
         if script_path.exists():
             self._dispatch_task = asyncio.create_task(self._run_dispatch_script(script_path))
         else:
@@ -534,10 +596,14 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
                     in_task_brief = False
                 elif line.startswith("TASK_BRIEF:"):
                     in_task_brief = True
-                    task_brief_lines = [line[len("TASK_BRIEF:"):]]
+                    task_brief_lines = [line[len("TASK_BRIEF:") :]]
                 elif in_task_brief:
                     # Collect continuation lines until we hit another known prefix or end
-                    if line.startswith("Marked ") or line.startswith("Warning:") or line.startswith("NONE"):
+                    if (
+                        line.startswith("Marked ")
+                        or line.startswith("Warning:")
+                        or line.startswith("NONE")
+                    ):
                         in_task_brief = False
                     else:
                         task_brief_lines.append(line)
@@ -587,7 +653,7 @@ Use the edit_file tool to make this change. Do this as your final step before re
         except Exception as e:
             logger.error("Failed to run dispatch script: {}", e)
 
-    def _build_subagent_prompt(self, task: str) -> str:
+    def _build_subagent_prompt(self, task: str, template: str | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from datetime import datetime
         import time as _time
@@ -595,7 +661,7 @@ Use the edit_file tool to make this change. Do this as your final step before re
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
 
-        return f"""# Subagent
+        system_prompt = f"""# Subagent
 
 ## Current Time
 {now} ({tz})
@@ -624,6 +690,20 @@ Your workspace is at: {self.workspace}
 Skills are available at: {self.workspace}/skills/ (read SKILL.md files as needed)
 
 When you have completed the task, provide a clear summary of your findings or actions."""
+
+        if template is not None:
+            template_content = SUBAGENT_TEMPLATES.get(template)
+            if template_content is not None:
+                system_prompt = f"""{template_content}
+
+{system_prompt}"""
+            else:
+                logger.warning(
+                    "SubagentManager: Template '{}' not found in SUBAGENT_TEMPLATES",
+                    template,
+                )
+
+        return system_prompt
 
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""

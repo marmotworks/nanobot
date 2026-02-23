@@ -68,11 +68,23 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional local file path to an image to pass to a vision-capable subagent. The image will be embedded as base64 in the subagent's first message.",
                 },
+                "template": {
+                    "type": "string",
+                    "description": "Optional system prompt template name to use for this subagent (e.g., 'code-fixer', 'planner'). Templates are defined in SUBAGENT_TEMPLATES.",
+                },
             },
             "required": ["task"],
         }
 
-    async def execute(self, task: str, label: str | None = None, model: str | None = None, image_path: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        task: str,
+        label: str | None = None,
+        model: str | None = None,
+        image_path: str | None = None,
+        template: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Spawn a subagent to execute the given task.
 
         Args:
@@ -85,10 +97,12 @@ class SpawnTool(Tool):
         Returns:
             Result from subagent or error message if validation fails.
         """
-        logger.info("SpawnTool.execute() called with task='{}', label='{}', model='{}'",
-                    task[:50] + "..." if len(task) > 50 else task,
-                    label or "None",
-                    model or "None")
+        logger.info(
+            "SpawnTool.execute() called with task='{}', label='{}', model='{}'",
+            task[:50] + "..." if len(task) > 50 else task,
+            label or "None",
+            model or "None",
+        )
 
         # Validate model selection against policies
         if model:
@@ -104,12 +118,17 @@ class SpawnTool(Tool):
             logger.info("SpawnTool: No model specified, inferring from task type")
             # Try to infer task type from task description
             task_lower = task.lower()
-            if any(word in task_lower for word in ["image", "vision", "screenshot", "diagram", "analyze visual"]):
+            if any(
+                word in task_lower
+                for word in ["image", "vision", "screenshot", "diagram", "analyze visual"]
+            ):
                 model = self._policy_manager.get_subagent_default("vision")
                 logger.info("SpawnTool: Inferred 'vision' task type, suggested model: '{}'", model)
             else:
                 model = self._policy_manager.get_subagent_default("technical")
-                logger.info("SpawnTool: Inferred 'technical' task type, suggested model: '{}'", model)
+                logger.info(
+                    "SpawnTool: Inferred 'technical' task type, suggested model: '{}'", model
+                )
 
             # Validate the suggested model
             logger.info("SpawnTool: Validating suggested model '{}' against policies", model)
@@ -127,8 +146,12 @@ class SpawnTool(Tool):
                 origin_chat_id=self._origin_chat_id,
                 model=model,
                 image_path=image_path,
+                template=template,
             )
-            logger.info("SpawnTool: manager.spawn() returned: {}", result[:100] + "..." if len(result) > 100 else result)
+            logger.info(
+                "SpawnTool: manager.spawn() returned: {}",
+                result[:100] + "..." if len(result) > 100 else result,
+            )
             return result
 
         logger.info("SpawnTool: Calling manager.spawn() with model='{}'", model)
@@ -139,6 +162,10 @@ class SpawnTool(Tool):
             origin_chat_id=self._origin_chat_id,
             model=model,
             image_path=image_path,
+            template=template,
         )
-        logger.info("SpawnTool: manager.spawn() returned: {}", result[:100] + "..." if len(result) > 100 else result)
+        logger.info(
+            "SpawnTool: manager.spawn() returned: {}",
+            result[:100] + "..." if len(result) > 100 else result,
+        )
         return result
