@@ -282,12 +282,13 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[[str], Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str]]:
-        """Run the agent iteration loop. Returns (final_content, tools_used)."""
+    ) -> tuple[str | None, list[str], object | None]:
+        """Run the agent iteration loop. Returns (final_content, tools_used, last_response)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        last_response = None
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -303,6 +304,8 @@ class AgentLoop:
             # Feed token usage into context tracker
             if response.usage and "total_tokens" in response.usage:
                 self.context_tracker.add_tokens(self.model, response.usage["total_tokens"])
+
+            last_response = response
 
             if response.has_tool_calls:
                 if on_progress:
@@ -341,7 +344,7 @@ class AgentLoop:
                 final_content = self._strip_think(response.content)
                 break
 
-        return final_content, tools_used
+        return final_content, tools_used, last_response
 
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
@@ -419,7 +422,7 @@ class AgentLoop:
                 channel=channel,
                 chat_id=chat_id,
             )
-            final_content, _ = await self._run_agent_loop(messages)
+            final_content, _, _ = await self._run_agent_loop(messages)
             session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
             session.add_message("assistant", final_content or "Background task completed.")
             self.sessions.save(session)
@@ -498,13 +501,35 @@ class AgentLoop:
                 )
             )
 
-        final_content, tools_used = await self._run_agent_loop(
+        final_content, tools_used, last_response = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+            logger.warning(
+                "Empty response from model: finish_reason={}, content={!r}, tool_calls={}",
+                last_response.finish_reason if last_response else "N/A",
+                last_response.content if last_response else "N/A",
+                last_response.tool_calls if last_response else [],
+            )
+            # Retry once with a nudge prompt
+            nudge_message = {
+                "role": "user",
+                "content": "Please provide a text response summarizing what you did or found.",
+            }
+            initial_messages.append(nudge_message)
+            final_content, _, last_response = await self._run_agent_loop(
+                initial_messages,
+                on_progress=on_progress or _bus_progress,
+            )
+
+            if final_content is None:
+                # Final fallback if retry also fails
+                finish_reason = last_response.finish_reason if last_response else "N/A"
+                raw_content = last_response.content if last_response else None
+                snippet = raw_content[:200] if raw_content and len(raw_content) > 0 else "N/A"
+                final_content = f"Model returned no response (finish_reason: {finish_reason}). Raw output: {snippet}"
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
