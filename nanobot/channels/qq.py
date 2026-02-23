@@ -93,10 +93,8 @@ class QQChannel(BaseChannel):
         """Stop the QQ bot."""
         self._running = False
         if self._client:
-            try:
+            with contextlib.suppress(Exception):
                 await self._client.close()
-            except Exception:
-                pass
         logger.info("QQ bot stopped")
 
     async def send(self, msg: OutboundMessage) -> None:

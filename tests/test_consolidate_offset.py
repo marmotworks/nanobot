@@ -760,7 +760,8 @@ class TestConsolidationDeduplicationGuard:
         async def _fake_consolidate(sess, archive_all: bool = False) -> bool:
             nonlocal archived_count
             if archive_all:
-                archived_count = len(sess.messages)
+                # Count only unconsolidated messages (from last_consolidated to end)
+                archived_count = len(sess.messages[sess.last_consolidated:])
                 return True
 
             started.set()

@@ -34,7 +34,6 @@ try:
         CreateMessageRequest,
         CreateMessageRequestBody,
         Emoji,
-        GetFileRequest,
         GetMessageResourceRequest,
         P2ImMessageReceiveV1,
     )

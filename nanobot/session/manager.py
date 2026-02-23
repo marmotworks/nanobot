@@ -31,6 +31,8 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
     failure_tracker: Any = None  # Optional FailureTracker instance
+    keep_count: int = 25  # Number of recent messages to keep after consolidation
+    memory_window: int = 50  # Maximum messages to keep in session
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""

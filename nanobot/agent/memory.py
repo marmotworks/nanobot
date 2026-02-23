@@ -80,9 +80,10 @@ class MemoryStore:
         Returns True on success (including no-op), False on failure.
         """
         if archive_all:
-            old_messages = session.messages
+            # When archive_all=True, archive only unconsolidated messages (from last_consolidated to end)
+            old_messages = session.messages[session.last_consolidated:]
             keep_count = 0
-            logger.info("Memory consolidation (archive_all): {} messages", len(session.messages))
+            logger.info("Memory consolidation (archive_all): {} messages", len(old_messages))
         else:
             keep_count = memory_window // 2
             if len(session.messages) <= keep_count:

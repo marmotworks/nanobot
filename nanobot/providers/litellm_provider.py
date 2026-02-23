@@ -256,7 +256,7 @@ class LiteLLMProvider(LLMProvider):
             }
 
         reasoning_content = getattr(message, "reasoning_content", None) or None
-        
+
         return LLMResponse(
             content=message.content,
             tool_calls=tool_calls,

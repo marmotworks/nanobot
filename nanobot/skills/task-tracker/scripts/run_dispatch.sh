@@ -1,6 +1,6 @@
 #!/bin/bash
 # Dispatch Cron Script
-# Runs readiness check, then marks the next ready milestone as [~] (in-progress)
+# Runs backlog review, then marks the next ready milestone as [~] (in-progress)
 
 set -e
 
@@ -8,10 +8,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKLOG_PATH="$HOME/.nanobot/workspace/memory/BACKLOG.md"
 REGISTRY_DB="$HOME/.nanobot/workspace/subagents.db"
 
-# Phase 1: Clear stale blockers
+# Phase 1: Review backlog and clear stale entries
 echo "=== Dispatch Cron ==="
-echo "Running readiness check..."
-python3 "$SCRIPT_DIR/check_readiness.py"
+echo "Running backlog review..."
+python3 "$SCRIPT_DIR/review_backlog.py"
 echo ""
 
 # Phase 2: Find and mark next ready milestone as in-progress

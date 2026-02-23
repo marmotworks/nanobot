@@ -23,7 +23,7 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.policy_manager import PolicyManager
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import SessionManager
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -107,6 +107,8 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
+        self._consolidation_locks: dict[str, asyncio.Lock] = {}  # Locks per session for consolidation deduplication
+        self._consolidation_tasks: list[asyncio.Task[bool]] = []  # In-flight consolidation tasks
         self._register_default_tools()
 
     def set_context_tracker(self, context_tracker: ContextTracker) -> None:
@@ -441,23 +443,43 @@ class AgentLoop:
         # Slash commands
         cmd = msg.content.strip().lower()
         if cmd == "/new":
-            messages_to_archive = session.messages.copy()
-            session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
+            # Wait for any in-flight consolidation tasks to complete BEFORE acquiring lock
+            if self._consolidation_tasks:
+                done, pending = await asyncio.wait(
+                    self._consolidation_tasks,
+                    timeout=None,
+                    return_when=asyncio.ALL_COMPLETED
+                )
 
-            async def _consolidate_and_cleanup():
-                temp = Session(key=session.key)
-                temp.messages = messages_to_archive
-                await self._consolidate_memory(temp, archive_all=True)
+            # Acquire the consolidation lock to prevent concurrent consolidation
+            lock = self._get_consolidation_lock(session.key)
+            async with lock:
+                # Archive only unconsolidated messages (not all messages)
+                messages_to_archive = session.messages[session.last_consolidated:-session.keep_count] if session.keep_count > 0 else session.messages[session.last_consolidated:]
 
-            task = asyncio.create_task(_consolidate_and_cleanup())
-            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="New session started. Memory consolidation in progress.",
-            )
+                success = await self._consolidate_memory(session, archive_all=True)
+
+                if success:
+                    # Clear session only after successful archival
+                    session.clear()
+                    self.sessions.save(session)
+                    self.sessions.invalidate(session.key)
+
+                    # Clean up the consolidation lock for invalidated session
+                    if session.key in self._consolidation_locks:
+                        del self._consolidation_locks[session.key]
+
+                    return OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="New session started. Memory consolidation in progress.",
+                    )
+                else:
+                    return OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="Failed to archive session memory. Session preserved.",
+                    )
         if cmd == "/help":
             return OutboundMessage(
                 channel=msg.channel,
@@ -469,13 +491,18 @@ class AgentLoop:
             self._consolidating.add(session.key)
 
             async def _consolidate_and_unlock():
+                lock = self._get_consolidation_lock(session.key)
                 try:
-                    await self._consolidate_memory(session)
+                    async with lock:
+                        await self._consolidate_memory(session)
                 finally:
                     self._consolidating.discard(session.key)
 
             unlock_task = asyncio.create_task(_consolidate_and_unlock())
-            unlock_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            self._consolidation_tasks.append(unlock_task)
+            unlock_task.add_done_callback(
+                lambda t: self._consolidation_tasks.remove(t) if t in self._consolidation_tasks else None
+            )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if (message_tool := self.tools.get("message")) and isinstance(message_tool, MessageTool):
@@ -554,15 +581,37 @@ class AgentLoop:
             metadata=msg.metadata or {},
         )
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> None:
-        """Delegate to MemoryStore.consolidate()."""
-        await MemoryStore(self.workspace).consolidate(
+    def _get_consolidation_lock(self, session_key: str) -> asyncio.Lock:
+        """Get or create a lock for a session to deduplicate consolidation tasks.
+
+        Args:
+            session_key: The session identifier
+
+        Returns:
+            An asyncio.Lock for the given session
+        """
+        if session_key not in self._consolidation_locks:
+            self._consolidation_locks[session_key] = asyncio.Lock()
+        return self._consolidation_locks[session_key]
+
+    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+        """Delegate to MemoryStore.consolidate().
+
+        Args:
+            session: The session to consolidate
+            archive_all: If True, archive all messages (used by /new command)
+
+        Returns:
+            True if consolidation succeeded, False otherwise
+        """
+        result = await MemoryStore(self.workspace).consolidate(
             session,
             self.provider,
             self.model,
             archive_all=archive_all,
             memory_window=self.memory_window,
         )
+        return result is not False
 
     async def process_direct(
         self,
