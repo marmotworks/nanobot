@@ -107,7 +107,9 @@ class AgentLoop:
         self._mcp_connected = False
         self._mcp_connecting = False
         self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_locks: dict[str, asyncio.Lock] = {}  # Locks per session for consolidation deduplication
+        self._consolidation_locks: dict[
+            str, asyncio.Lock
+        ] = {}  # Locks per session for consolidation deduplication
         self._consolidation_tasks: list[asyncio.Task[bool]] = []  # In-flight consolidation tasks
         self._register_default_tools()
 
@@ -138,6 +140,7 @@ class AgentLoop:
             token = getattr(getattr(self._config, "discord", None), "token", None)
             if token:
                 from nanobot.agent.tools.react import DiscordReactTool
+
                 self.tools.register(DiscordReactTool(token=token))
 
     async def _connect_mcp(self) -> None:
@@ -230,47 +233,69 @@ class AgentLoop:
                 )
                 return response
 
-            # Tier 2: Local CustomProvider with glm-4.7-flash
+            # Tier 2: Local CustomProvider with config-driven values
+            tier2_model = "zai-org/glm-4.7-flash"
+            tier2_api_base = "http://localhost:1234/v1"
+            if (
+                self._config is not None
+                and self._config.fallback is not None
+                and self._config.fallback.tier2 is not None
+            ):
+                tier2_model = self._config.fallback.tier2.model
+                tier2_api_base = self._config.fallback.tier2.api_base or "http://localhost:1234/v1"
+
             logger.warning(
-                "Primary provider error — falling back to local glm-4.7-flash: {}", content[:120]
+                "Primary provider error — falling back to local {}: {}", tier2_model, content[:120]
             )
             try:
                 from nanobot.providers.custom_provider import CustomProvider
 
                 fallback = CustomProvider(
                     api_key="lm-studio",
-                    api_base="http://localhost:1234/v1",
-                    default_model="zai-org/glm-4.7-flash",
+                    api_base=tier2_api_base,
+                    default_model=tier2_model,
                 )
                 response = await fallback.chat(
                     messages=messages,
                     tools=tools,
-                    model="zai-org/glm-4.7-flash",
+                    model=tier2_model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
-                logger.info("Fallback to glm-4.7-flash succeeded")
+                logger.info("Fallback to {} succeeded", tier2_model)
             except Exception as e:
                 logger.error("Tier 2 fallback provider also failed: {}", e)
-                # Tier 3: AWS Bedrock with claude-sonnet-4-6
+                # Tier 3: AWS Bedrock with config-driven values
+                tier3_region = "us-east-1"
+                tier3_model = "us.anthropic.claude-sonnet-4-6"
+                if (
+                    self._config is not None
+                    and self._config.fallback is not None
+                    and self._config.fallback.tier3 is not None
+                ):
+                    tier3_region = self._config.fallback.tier3.region or "us-east-1"
+                    tier3_model = (
+                        self._config.fallback.tier3.model or "us.anthropic.claude-sonnet-4-6"
+                    )
+
                 logger.warning(
-                    "Tier 2 fallback failed — falling back to AWS Bedrock (us.anthropic.claude-sonnet-4-6)"
+                    "Tier 2 fallback failed — falling back to AWS Bedrock ({})", tier3_model
                 )
                 try:
                     from nanobot.providers.bedrock_provider import BedrockProvider
 
                     fallback = BedrockProvider(
-                        region_name="us-east-1",
-                        default_model="us.anthropic.claude-sonnet-4-6",
+                        region_name=tier3_region,
+                        default_model=tier3_model,
                     )
                     response = await fallback.chat(
                         messages=messages,
                         tools=tools,
-                        model="us.anthropic.claude-sonnet-4-6",
+                        model=tier3_model,
                         temperature=temperature,
                         max_tokens=max_tokens,
                     )
-                    logger.info("Fallback to AWS Bedrock succeeded")
+                    logger.info("Fallback to AWS Bedrock ({}) succeeded", tier3_model)
                 except Exception as e2:
                     logger.error("Tier 3 fallback also failed: {}", e2)
                     return LLMResponse(
@@ -446,16 +471,16 @@ class AgentLoop:
             # Wait for any in-flight consolidation tasks to complete BEFORE acquiring lock
             if self._consolidation_tasks:
                 _done, _pending = await asyncio.wait(
-                    self._consolidation_tasks,
-                    timeout=None,
-                    return_when=asyncio.ALL_COMPLETED
+                    self._consolidation_tasks, timeout=None, return_when=asyncio.ALL_COMPLETED
                 )
 
             # Acquire the consolidation lock to prevent concurrent consolidation
             lock = self._get_consolidation_lock(session.key)
             async with lock:
                 # Archive only unconsolidated messages (not all messages)
-                session.messages[session.last_consolidated:-session.keep_count] if session.keep_count > 0 else session.messages[session.last_consolidated:]
+                session.messages[
+                    session.last_consolidated : -session.keep_count
+                ] if session.keep_count > 0 else session.messages[session.last_consolidated :]
 
                 success = await self._consolidate_memory(session, archive_all=True)
 
@@ -501,7 +526,9 @@ class AgentLoop:
             unlock_task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.append(unlock_task)
             unlock_task.add_done_callback(
-                lambda t: self._consolidation_tasks.remove(t) if t in self._consolidation_tasks else None
+                lambda t: (
+                    self._consolidation_tasks.remove(t) if t in self._consolidation_tasks else None
+                )
             )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
