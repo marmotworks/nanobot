@@ -1,8 +1,8 @@
 """Unit tests for Discord channel expressive reaction triggers."""
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
 from unittest import IsolatedAsyncioTestCase
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from nanobot.channels.discord import DiscordChannel
 
@@ -15,6 +15,7 @@ class TestDiscordExpressiveTriggers(IsolatedAsyncioTestCase):
         self.config = MagicMock()
         self.bus = MagicMock()
         self.channel = DiscordChannel(self.config, self.bus)
+        self.channel.is_allowed = MagicMock(return_value=True)
 
     async def _create_payload(self, content: str) -> dict[str, str | list | None]:
         """Create a synthetic Discord message payload."""
