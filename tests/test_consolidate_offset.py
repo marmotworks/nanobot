@@ -1,10 +1,8 @@
 """Test session management with cache-friendly message handling."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -711,9 +709,7 @@ class TestConsolidationDeduplicationGuard:
         before_count = len(session.messages)
 
         async def _failing_consolidate(sess, archive_all: bool = False) -> bool:
-            if archive_all:
-                return False
-            return True
+            return not archive_all
 
         loop._consolidate_memory = _failing_consolidate  # type: ignore[method-assign]
 

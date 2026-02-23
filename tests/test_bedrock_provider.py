@@ -409,9 +409,9 @@ class TestBedrockProvider:
     def _mock_bedrock_exception(exception_name: str, message: str) -> Exception:
         """Create a mock Bedrock exception."""
 
-        class MockBedrockException(Exception):
+        class MockBedrockError(Exception):
             pass
 
-        exception = MockBedrockException(message)
+        exception = MockBedrockError(message)
         exception.__class__.__name__ = exception_name
         return exception

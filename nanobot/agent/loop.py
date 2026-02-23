@@ -445,7 +445,7 @@ class AgentLoop:
         if cmd == "/new":
             # Wait for any in-flight consolidation tasks to complete BEFORE acquiring lock
             if self._consolidation_tasks:
-                done, pending = await asyncio.wait(
+                _done, _pending = await asyncio.wait(
                     self._consolidation_tasks,
                     timeout=None,
                     return_when=asyncio.ALL_COMPLETED
@@ -455,7 +455,7 @@ class AgentLoop:
             lock = self._get_consolidation_lock(session.key)
             async with lock:
                 # Archive only unconsolidated messages (not all messages)
-                messages_to_archive = session.messages[session.last_consolidated:-session.keep_count] if session.keep_count > 0 else session.messages[session.last_consolidated:]
+                session.messages[session.last_consolidated:-session.keep_count] if session.keep_count > 0 else session.messages[session.last_consolidated:]
 
                 success = await self._consolidate_memory(session, archive_all=True)
 

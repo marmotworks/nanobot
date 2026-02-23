@@ -7,7 +7,6 @@ from pathlib import Path
 import re
 import sqlite3
 
-
 BACKLOG_PATH = Path.home() / ".nanobot/workspace/memory/BACKLOG.md"
 DB_PATH = Path.home() / ".nanobot/workspace/subagents.db"
 
