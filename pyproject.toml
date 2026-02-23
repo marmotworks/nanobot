@@ -121,6 +121,9 @@ ignore = [
     "S101",  # assert statements OK in tests
     "N802",  # function names can be lowercase in tests
 ]
+"nanobot/skills/task-tracker/**/*.py" = [
+    "N999",  # module name contains hyphen (directory name convention)
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["nanobot"]

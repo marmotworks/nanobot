@@ -9,6 +9,10 @@ import sqlite3
 from loguru import logger
 
 
+class CapacityError(Exception):
+    """Raised when the subagent registry is at maximum capacity."""
+
+
 class SubagentRegistry:
     """SQLite-backed registry for tracking subagent tasks."""
 
@@ -76,6 +80,40 @@ class SubagentRegistry:
             (task_id, label, origin, now),
         )
         self._conn.commit()
+
+    def tag_in_atomic(self, task_id: str, label: str, origin: str, max_capacity: int = 3) -> None:
+        """Atomically check capacity and insert a new subagent entry.
+
+        Raises CapacityError if count of pending+running >= max_capacity.
+        """
+        assert self._conn is not None
+        if origin not in ("user", "cron"):
+            raise ValueError(f"origin must be 'user' or 'cron', got '{origin}'")
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = self._conn.execute(
+                "SELECT COUNT(*) FROM subagents WHERE status IN ('pending', 'running')"
+            )
+            count = cursor.fetchone()[0]
+            if count >= max_capacity:
+                self._conn.execute("ROLLBACK")
+                raise CapacityError(
+                    f"Registry at maximum capacity ({count} >= {max_capacity})"
+                )
+            self._conn.execute(
+                """
+                INSERT INTO subagents (id, label, origin, status, spawned_at)
+                VALUES (?, ?, ?, 'pending', ?)
+                """,
+                (task_id, label, origin, now),
+            )
+            self._conn.execute("COMMIT")
+        except CapacityError:
+            raise  # already rolled back above
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def set_running(self, task_id: str) -> None:
         """Update status to 'running' and record started_at timestamp."""

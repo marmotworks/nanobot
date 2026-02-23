@@ -110,6 +110,7 @@ Check the return value from `spawn`. If it contains "Error" or "capacity limit":
 If the return value contains "started" or a task ID:
 - The spawn succeeded
 - Record the task ID in a note if helpful
+- **Do NOT call the `message` tool to announce the dispatch** — the cron job's `deliver: true` setting handles delivery automatically. Calling `message` causes duplicate posts.
 - Done ✅
 
 ### Step 6: Handle spawn failure (only if Step 5 failed)

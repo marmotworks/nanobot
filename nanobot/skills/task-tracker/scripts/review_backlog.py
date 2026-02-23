@@ -6,6 +6,17 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import sqlite3
+import sys
+
+
+def match_milestone_label(label: str, milestone_num: str) -> bool:
+    """Return True if label matches the given milestone number.
+
+    Matches if the label equals milestone_num exactly, or starts with
+    '{milestone_num} ' (with trailing space, to avoid '30.1' matching '30.10').
+    """
+    return label == milestone_num or label.startswith(f"{milestone_num} ")
+
 
 BACKLOG_PATH = Path.home() / ".nanobot/workspace/memory/BACKLOG.md"
 DB_PATH = Path.home() / ".nanobot/workspace/subagents.db"
@@ -69,9 +80,8 @@ def main() -> int:
         m = re.match(r"(\s*- \[~\] )(\d+\.\d+)(.*)", line)
         if m:
             milestone_num = m.group(2)
-            # Check if any active subagent label matches this milestone
             is_active = any(
-                label == milestone_num or label.startswith(milestone_num)
+                match_milestone_label(label, milestone_num)
                 for label in active_labels
             )
             if not is_active:
@@ -89,4 +99,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

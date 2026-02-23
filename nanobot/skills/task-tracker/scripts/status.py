@@ -86,15 +86,24 @@ def parse_tasks(content: str) -> list[dict]:
                         "status": marker,
                         "description": desc,
                         "blocker": None,
+                        "criterion": "",
+                        "file": "",
+                        "note": "",
                     }
-                    # Scan continuation lines for Blocker:
+                    # Scan continuation lines for Criterion:, File:, Blocker:, Note:
                     j = i + 1
                     while j < len(lines):
                         cont = lines[j].strip()
                         if not cont or re.match(r"^- \[([ x~])\]", cont):
                             break
-                        if cont.startswith("Blocker:"):
+                        if cont.startswith("Criterion:"):
+                            milestone["criterion"] = cont[10:].strip()
+                        elif cont.startswith("File:"):
+                            milestone["file"] = cont[5:].strip()
+                        elif cont.startswith("Blocker:"):
                             milestone["blocker"] = cont[8:].strip()
+                        elif cont.startswith("Note:"):
+                            milestone["note"] = cont[5:].strip()
                         j += 1
                     task_data["milestones"].append(milestone)
                     i = j - 1

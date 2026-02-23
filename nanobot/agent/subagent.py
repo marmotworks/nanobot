@@ -11,7 +11,7 @@ import uuid
 
 from loguru import logger
 
-from nanobot.agent.registry import SubagentRegistry
+from nanobot.agent.registry import CapacityError, SubagentRegistry
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -297,14 +297,11 @@ class SubagentManager:
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
 
-        # Capacity enforcement
-        count = self.registry.get_running_count()
-        if count >= 3:
-            raise RuntimeError(f"Subagent capacity limit reached ({count}/3 running)")
-
-        # Register the task in the registry
-        origin_str = "user"
-        self.registry.tag_in(task_id, display_label, origin_str)
+        # Register the task in the registry (atomic capacity check + insert)
+        try:
+            self.registry.tag_in_atomic(task_id, display_label, "user")
+        except CapacityError as e:
+            return str(e)
 
         logger.info("SubagentManager: Creating background task with task_id='{}'", task_id)
         origin = {
@@ -341,6 +338,8 @@ class SubagentManager:
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("SubagentManager._run_subagent() called for task_id='{}'", task_id)
+
+        final_status = "failed"
 
         # Use provided model or fall back to manager's default
         subagent_model = model or self.model
@@ -492,11 +491,15 @@ class SubagentManager:
 
             logger.info("Subagent [{}] completed with result: {}", task_id, final_result[:100])
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
+            final_status = "completed"
 
         except Exception as e:
             error_msg = f"Error: {e!s}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
+
+        finally:
+            self.registry.tag_out(task_id, final_status)
 
     async def _announce_result(
         self,
@@ -523,11 +526,6 @@ Result:
 {result}
 
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
-
-        # Tag out in registry
-        registry_status = "completed" if status == "ok" else "failed"
-        result_summary = result[:200]
-        self.registry.tag_out(task_id, registry_status, result_summary)
 
         # Inject as system message to trigger main agent
         msg = InboundMessage(

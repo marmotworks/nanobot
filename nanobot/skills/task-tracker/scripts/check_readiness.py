@@ -10,9 +10,34 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import sys
 
 BACKLOG_PATH = os.environ.get("BACKLOG_PATH", os.path.expanduser("~/.nanobot/workspace/memory/BACKLOG.md"))
+
+DB_PATH = os.path.expanduser("~/.nanobot/workspace/subagents.db")
+
+
+def get_running_count() -> int:
+    """Return count of pending+running subagents in the registry."""
+    if not os.path.exists(DB_PATH):
+        return 0
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM subagents WHERE status IN ('pending', 'running')"
+        )
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+    except Exception:
+        return 0
+
+MAX_CAPACITY = 3
+
+if get_running_count() >= MAX_CAPACITY:
+    print("NONE")
+    sys.exit(0)
 
 
 def read_backlog() -> str:

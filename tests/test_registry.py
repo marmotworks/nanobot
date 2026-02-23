@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.registry import SubagentRegistry
+from nanobot.agent.registry import CapacityError, SubagentRegistry
 from nanobot.agent.subagent import SubagentManager
 
 
@@ -225,6 +225,39 @@ class TestSubagentRegistryGetRetryCount:
     def test_get_retry_count_not_found(self, registry: SubagentRegistry) -> None:
         """Unknown task_id returns 0."""
         assert registry.get_retry_count("nonexistent") == 0
+
+
+class TestTagInAtomic:
+    """Tests for SubagentRegistry.tag_in_atomic() (milestone 30.6)."""
+
+    def test_tag_in_atomic_success(self, registry: SubagentRegistry) -> None:
+        """tag_in_atomic succeeds and registry has 1 running entry."""
+        registry.tag_in_atomic("id1", "label1", "user")
+        assert registry.get_running_count() == 1
+
+    def test_tag_in_atomic_capacity_enforcement(self, registry: SubagentRegistry) -> None:
+        """Filling 3 slots with tag_in_atomic, 4th raises CapacityError."""
+        registry.tag_in_atomic("task1", "task 1", "user")
+        registry.tag_in_atomic("task2", "task 2", "user")
+        registry.tag_in_atomic("task3", "task 3", "user")
+        assert registry.get_running_count() == 3
+        with pytest.raises(CapacityError):
+            registry.tag_in_atomic("task4", "task 4", "user")
+
+    def test_tag_in_atomic_after_tag_out(self, registry: SubagentRegistry) -> None:
+        """Fill 3 slots, tag_out one, 4th tag_in_atomic succeeds."""
+        registry.tag_in_atomic("task1", "task 1", "user")
+        registry.tag_in_atomic("task2", "task 2", "user")
+        registry.tag_in_atomic("task3", "task 3", "user")
+        assert registry.get_running_count() == 3
+        registry.tag_out("task2", "completed", "done")
+        registry.tag_in_atomic("task4", "task 4", "user")
+        assert registry.get_running_count() == 3
+
+    def test_capacity_error_is_importable(self) -> None:
+        """CapacityError is importable and is a subclass of Exception."""
+        from nanobot.agent.registry import CapacityError
+        assert issubclass(CapacityError, Exception)
 
 
 @pytest.mark.integration

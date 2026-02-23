@@ -105,7 +105,7 @@ for task in sorted(tasks, key=lambda t: t['number']):
 
         if m['status'] == ' ' and (not m.get('blocker') or m.get('blocker') == 'none'):
             # Found a ready milestone - mark it as [~] in BACKLOG.md
-            milestone_text = m.get('text', '')
+            milestone_text = m.get('description', '')
             criterion = m.get('criterion', '')
             file_path = m.get('file', '')
             blocker = m.get('blocker', 'none')
@@ -114,7 +114,15 @@ for task in sorted(tasks, key=lambda t: t['number']):
             print(f'READY:{milestone_num}:{task["number"]}')
 
             # Print full milestone text as TASK_BRIEF
-            task_brief = f"## Milestone {milestone_num}: {milestone_text}\nCriterion: {criterion}\nFile: {file_path}\nBlocker: {blocker}"
+            note = m.get('note', '')
+            task_brief = (
+                f"## Milestone {milestone_num}: {milestone_text}\n"
+                f"Criterion: {criterion}\n"
+                f"File: {file_path}\n"
+                f"Blocker: {blocker}"
+            )
+            if note:
+                task_brief += f"\nNote: {note}"
             print(f'TASK_BRIEF:{task_brief}')
 
             # Edit BACKLOG.md to mark as in-progress
