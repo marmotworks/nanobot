@@ -23,7 +23,7 @@ DB_PATH = Path.home() / ".nanobot/workspace/subagents.db"
 
 
 def get_active_labels(db_path: Path) -> set[str]:
-    """Return labels of subagents currently running."""
+    """Return labels of subagents currently running or pending."""
     if not db_path.exists():
         return set()
     try:
@@ -35,6 +35,26 @@ def get_active_labels(db_path: Path) -> set[str]:
         return {row[0] for row in rows if row[0]}
     except Exception:
         return set()
+
+
+def get_milestone_status(db_path: Path, milestone_num: str) -> str | None:
+    """Return the most recent status for a milestone from the registry.
+
+    Returns None if no entry found.
+    """
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.execute(
+            "SELECT status FROM subagents WHERE label = ? OR label LIKE ? ORDER BY created_at DESC LIMIT 1",
+            (milestone_num, f"{milestone_num} %")
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
 
 
 def get_completed_milestones(content: str) -> set[str]:
@@ -80,6 +100,17 @@ def main() -> int:
         m = re.match(r"(\s*- \[~\] )(\d+\.\d+)(.*)", line)
         if m:
             milestone_num = m.group(2)
+            # Check registry for this milestone's status
+            status = get_milestone_status(DB_PATH, milestone_num)
+            if status == "completed":
+                # Milestone is done - mark with [x]
+                line = m.group(1).replace("[~]", "[x]") + m.group(2) + m.group(3)
+                orphans_reset += 1
+            elif status in ("running", "pending"):
+                # Still active - don't reset
+                new_lines.append(line)
+                continue
+            # failed, lost, or other - fall through to reset
             is_active = any(
                 match_milestone_label(label, milestone_num)
                 for label in active_labels

@@ -18,7 +18,9 @@ echo ""
 echo "Checking for ready milestones..."
 
 # Write the Python script to a temp file to avoid quoting issues
-TMPFILE=$(mktemp /tmp/find_ready_milestone_XXXXXX.py)
+NANOBOT_TMP="$HOME/.nanobot/workspace/tmp"
+mkdir -p "$NANOBOT_TMP"
+TMPFILE=$(mktemp "$NANOBOT_TMP/find_ready_milestone_XXXXXX.py")
 trap "rm -f $TMPFILE" EXIT
 
 cat > "$TMPFILE" << 'PYTHON_SCRIPT'
@@ -26,9 +28,12 @@ import sys
 import re
 import sqlite3
 import importlib.util
+import fcntl
+import os
 
 BACKLOG_PATH = '/Users/mhall/.nanobot/workspace/memory/BACKLOG.md'
 REGISTRY_DB = '/Users/mhall/.nanobot/workspace/subagents.db'
+LOCK_FILE = os.path.expanduser("~/.nanobot/workspace/.backlog.lock")
 
 # Dynamically import status.py functions
 spec = importlib.util.spec_from_file_location("status", "/Users/mhall/Workspaces/nanobot/nanobot/skills/task-tracker/scripts/status.py")
@@ -96,60 +101,66 @@ for task in sorted(tasks, key=lambda t: t['number']):
                     print(f'Warning: Could not mark {milestone_num} as done')
 
 # Phase 2b: Find and mark next ready [ ] milestone as in-progress
-for task in sorted(tasks, key=lambda t: t['number']):
-    if 'Complete' in task['status'] or task['status'] == 'Blocked':
-        continue
-    for m in task['milestones']:
-        milestone_num = m['number']
+# Wrap the entire read-select-write sequence with an exclusive file lock
+with open(LOCK_FILE, "w") as lock_fh:
+    fcntl.flock(lock_fh, fcntl.LOCK_EX)
+    try:
+        for task in sorted(tasks, key=lambda t: t['number']):
+            if 'Complete' in task['status'] or task['status'] == 'Blocked':
+                continue
+            for m in task['milestones']:
+                milestone_num = m['number']
 
-        # Skip if already in-progress (we just checked those)
-        if m['status'] == '~':
-            continue
+                # Skip if already in-progress (we just checked those)
+                if m['status'] == '~':
+                    continue
 
-        if m['status'] == ' ' and (not m.get('blocker') or m.get('blocker') == 'none'):
-            # Found a ready milestone - mark it as [~] in BACKLOG.md
-            milestone_text = m.get('description', '')
-            criterion = m.get('criterion', '')
-            file_path = m.get('file', '')
-            blocker = m.get('blocker', 'none')
+                if m['status'] == ' ' and (not m.get('blocker') or m.get('blocker') == 'none'):
+                    # Found a ready milestone - mark it as [~] in BACKLOG.md
+                    milestone_text = m.get('description', '')
+                    criterion = m.get('criterion', '')
+                    file_path = m.get('file', '')
+                    blocker = m.get('blocker', 'none')
 
-            # Print READY line
-            print(f'READY:{milestone_num}:{task["number"]}')
+                    # Print READY line
+                    print(f'READY:{milestone_num}:{task["number"]}')
 
-            # Print full milestone text as TASK_BRIEF
-            note = m.get('note', '')
-            task_brief = (
-                f"## Milestone {milestone_num}: {milestone_text}\n"
-                f"Criterion: {criterion}\n"
-                f"File: {file_path}\n"
-                f"Blocker: {blocker}"
-            )
-            if note:
-                task_brief += f"\nNote: {note}"
-            print(f'TASK_BRIEF:{task_brief}')
+                    # Print full milestone text as TASK_BRIEF
+                    note = m.get('note', '')
+                    task_brief = (
+                        f"## Milestone {milestone_num}: {milestone_text}\n"
+                        f"Criterion: {criterion}\n"
+                        f"File: {file_path}\n"
+                        f"Blocker: {blocker}"
+                    )
+                    if note:
+                        task_brief += f"\nNote: {note}"
+                    print(f'TASK_BRIEF:{task_brief}')
 
-            # Edit BACKLOG.md to mark as in-progress
-            pattern = rf'- \[ \] ({re.escape(milestone_num)} )'
-            replacement = f'- [~] {milestone_num} '
+                    # Edit BACKLOG.md to mark as in-progress
+                    pattern = rf'- \[ \] ({re.escape(milestone_num)} )'
+                    replacement = f'- [~] {milestone_num} '
 
-            with open(BACKLOG_PATH, 'r') as f:
-                lines = f.readlines()
+                    with open(BACKLOG_PATH, 'r') as f:
+                        lines = f.readlines()
 
-            updated = False
-            for i, line in enumerate(lines):
-                if re.match(pattern, line):
-                    lines[i] = re.sub(pattern, replacement, line)
-                    updated = True
-                    break
+                    updated = False
+                    for i, line in enumerate(lines):
+                        if re.match(pattern, line):
+                            lines[i] = re.sub(pattern, replacement, line)
+                            updated = True
+                            break
 
-            if updated:
-                with open(BACKLOG_PATH, 'w') as f:
-                    f.writelines(lines)
-                print(f'Marked {milestone_num} as in-progress')
-            else:
-                print(f'Warning: Could not find milestone {milestone_num} in BACKLOG.md')
-            sys.exit(0)
-print('NONE')
+                    if updated:
+                        with open(BACKLOG_PATH, 'w') as f:
+                            f.writelines(lines)
+                        print(f'Marked {milestone_num} as in-progress')
+                    else:
+                        print(f'Warning: Could not find milestone {milestone_num} in BACKLOG.md')
+                    sys.exit(0)
+        print('NONE')
+    finally:
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
 PYTHON_SCRIPT
 
 python3 "$TMPFILE"
