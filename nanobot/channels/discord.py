@@ -21,22 +21,16 @@ MAX_MESSAGE_LEN = 2000  # Discord message character limit
 
 # Emoji registry for reaction mappings
 EXPRESSIVE_TRIGGERS: dict[str, str] = {
-    "thanks": "🙏",
-    "thank you": "🙏",
-    "help": "👀",
+    "thanks": "👀",
     "bug": "🐛",
-    "error": "🐛",
-    "failed": "🐛",
-    "done": "✅",
-    "complete": "✅",
-    "fixed": "✅",
+    "error": "❌",
+    "question": "❓",
+    "code": "👨‍💻",
 }
 
 INTERACTIVE_ACTIONS: dict[str, str] = {
     "👍": "approve",
-    "👎": "reject",
-    "❌": "cancel",
-    "✅": "confirm",
+    "❌": "reject",
 }
 
 
@@ -66,6 +60,10 @@ class DiscordChannel(BaseChannel):
     """Discord channel using Gateway websocket."""
 
     name = "discord"
+    emoji_registry: dict[str, dict[str, str]] = {
+        "EXPRESSIVE_TRIGGERS": EXPRESSIVE_TRIGGERS,
+        "INTERACTIVE_ACTIONS": INTERACTIVE_ACTIONS,
+    }
 
     def __init__(self, config: DiscordConfig, bus: MessageBus):
         super().__init__(config, bus)

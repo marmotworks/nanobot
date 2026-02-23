@@ -289,3 +289,121 @@ class TestBedrockProvider:
             for msg in converted:
                 for block in msg.get("content", []):
                     assert "toolUse" not in block
+
+    @pytest.mark.asyncio
+    async def test_tier3_fallback_retry(self):
+        """Test tier-3 fallback retry behavior with retryable errors."""
+
+        # Retryable exceptions for Bedrock Converse API
+        retryable_exceptions = [
+            ("ThrottlingException", "Rate limit exceeded"),
+            ("ModelStreamErrorException", "Stream error"),
+        ]
+
+        # Mock response for successful fallback
+        mock_success_response = {
+            "output": {"message": {"role": "assistant", "content": [{"text": "Fallback success!"}]}},
+            "usage": {"inputTokens": 5, "outputTokens": 10, "totalTokens": 15},
+            "stopReason": "end_turn",
+        }
+
+        for exception_name, error_msg in retryable_exceptions:
+            with patch("boto3.client") as mock_boto3:
+                mock_client = MagicMock()
+
+                # First call raises retryable exception, second call succeeds
+                mock_client.converse.side_effect = [
+                    self._mock_bedrock_exception(exception_name, error_msg),
+                    mock_success_response,
+                ]
+                mock_boto3.return_value = mock_client
+
+                # Provider with fallback models
+                provider = BedrockProvider(
+                    region_name="us-east-1",
+                    default_model="us.anthropic.claude-sonnet-4-6",
+                )
+                # Override fallback_models for testing
+                provider.fallback_models = [
+                    "us.anthropic.claude-sonnet-4-6",
+                    "us.anthropic.claude-opus-4-6-v1",
+                ]
+
+                response = await provider.chat(
+                    messages=[{"role": "user", "content": "Hi"}],
+                    model="us.anthropic.claude-sonnet-4-6",
+                )
+
+                # Verify fallback worked
+                assert response.content == "Fallback success!"
+                assert mock_client.converse.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_tier3_fallback_all_models_fail(self):
+        """Test that when all fallback models fail, the appropriate exception is raised."""
+
+        with patch("boto3.client") as mock_boto3:
+            mock_client = MagicMock()
+
+            # All calls raise retryable exceptions
+            mock_client.converse.side_effect = [
+                self._mock_bedrock_exception("ThrottlingException", "Rate limit"),
+                self._mock_bedrock_exception("ModelStreamErrorException", "Stream error"),
+            ]
+            mock_boto3.return_value = mock_client
+
+            provider = BedrockProvider(
+                region_name="us-east-1",
+                default_model="us.anthropic.claude-sonnet-4-6",
+            )
+            provider.fallback_models = [
+                "us.anthropic.claude-sonnet-4-6",
+                "us.anthropic.claude-opus-4-6-v1",
+            ]
+
+            with pytest.raises(Exception, match="ThrottlingException"):
+                await provider.chat(
+                    messages=[{"role": "user", "content": "Hi"}],
+                    model="us.anthropic.claude-sonnet-4-6",
+                )
+
+            # Both models should have been tried
+            assert mock_client.converse.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_tier3_fallback_non_retryable_error(self):
+        """Test that non-retryable errors fail immediately without retry."""
+
+        with patch("boto3.client") as mock_boto3:
+            mock_client = MagicMock()
+
+            # Non-retryable exception (InvalidRequestException)
+            mock_client.converse.side_effect = self._mock_bedrock_exception(
+                "InvalidRequestException", "Invalid model ID"
+            )
+            mock_boto3.return_value = mock_client
+
+            provider = BedrockProvider(
+                region_name="us-east-1",
+                default_model="us.anthropic.claude-sonnet-4-6",
+            )
+            provider.fallback_models = [
+                "us.anthropic.claude-sonnet-4-6",
+                "us.anthropic.claude-opus-4-6-v1",
+            ]
+
+            with pytest.raises(Exception, match="InvalidRequestException"):
+                await provider.chat(
+                    messages=[{"role": "user", "content": "Hi"}],
+                    model="us.anthropic.claude-sonnet-4-6",
+                )
+
+            # Should fail immediately without retrying
+            assert mock_client.converse.call_count == 1
+
+    @staticmethod
+    def _mock_bedrock_exception(exception_name: str, message: str) -> Exception:
+        """Create a mock Bedrock exception."""
+        exception = Exception(message)
+        exception.__class__.__name__ = exception_name
+        return exception

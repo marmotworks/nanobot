@@ -26,6 +26,11 @@ class BedrockProvider(LLMProvider):
         self.region_name = region_name
         self.default_model = default_model
         self._client = boto3.client("bedrock-runtime", region_name=region_name)
+        # Tier-3 fallback chain: models to try if primary fails
+        self.fallback_models: list[str] = [
+            "us.anthropic.claude-sonnet-4-6",
+            "us.anthropic.claude-opus-4-6-v1",
+        ]
 
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
@@ -285,6 +290,38 @@ class BedrockProvider(LLMProvider):
                 bedrock_messages, system_prompts, bedrock_tools, model_id, max_tokens, temperature
             )
 
+        # Tier-3 fallback: try primary model, then fallback models on retryable errors
+        models_to_try = [model_id] + [
+            m for m in self.fallback_models if m != model_id
+        ]
+
+        last_exception = None
+        for try_model in models_to_try:
+            try:
+                response = await self._converse_with_model(
+                    bedrock_messages, system_prompts, bedrock_tools, try_model, max_tokens, temperature
+                )
+                return response
+            except Exception as e:
+                last_exception = e
+                # Check if this is a retryable exception
+                if not self._is_retryable_exception(e):
+                    # Non-retryable error: fail immediately
+                    raise
+
+        # All models failed: raise the last exception
+        raise last_exception
+
+    async def _converse_with_model(
+        self,
+        bedrock_messages: list[dict[str, Any]],
+        system_prompts: list[dict[str, Any]],
+        bedrock_tools: list[dict[str, Any]] | None,
+        model_id: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> LLMResponse:
+        """Execute a single converse call and return parsed response."""
         def _converse() -> dict[str, Any]:
             kwargs: dict[str, Any] = {
                 "modelId": model_id,
@@ -303,6 +340,22 @@ class BedrockProvider(LLMProvider):
 
         response = await asyncio.get_event_loop().run_in_executor(None, _converse)
         return self._parse_response(response)
+
+    def _is_retryable_exception(self, exception: Exception) -> bool:
+        """Check if an exception is retryable (should trigger fallback)."""
+        exception_name = getattr(exception, "__class__", None)
+        if exception_name:
+            exception_name = exception_name.__name__
+        else:
+            exception_name = type(exception).__name__
+
+        retryable_names = {
+            "ThrottlingException",
+            "ModelStreamErrorException",
+            "ServiceUnavailableException",
+            "InternalServerException",
+        }
+        return exception_name in retryable_names
 
     async def _chat_stream(
         self,
