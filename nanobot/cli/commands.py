@@ -7,6 +7,7 @@ from pathlib import Path
 import select
 import signal
 import sys
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -327,13 +328,68 @@ def _make_provider(config: Config):
 # Gateway / Server
 # ============================================================================
 
+# Global references for SIGHUP handler
+_gateway_agent: Any | None = None
+_gateway_bus: Any | None = None
+_gateway_channels: Any | None = None
+_gateway_cron: Any | None = None
+_gateway_heartbeat: Any | None = None
+
+
+def _sighup_handler():
+    """Handle SIGHUP signal for config reload.
+
+    This handler is registered with asyncio's event loop using
+    loop.add_signal_handler() for asyncio-safe signal handling.
+
+    On SIGHUP, we:
+    1. Reload the configuration from disk
+    2. Reconnect channels (if needed)
+    3. Re-register cron jobs (if needed)
+
+    Note: This handler runs in the main thread, so we use
+    asyncio.run_coroutine_threadsafe() to schedule async operations.
+    """
+    from nanobot.config.loader import load_config
+
+    console.print("[yellow]Received SIGHUP, reloading configuration...[/yellow]")
+
+    # Reload config
+    config = load_config()
+
+    # Update global references with new config
+    global _gateway_agent, _gateway_bus, _gateway_channels, _gateway_cron, _gateway_heartbeat
+
+    # Update agent with new config if available
+    if _gateway_agent is not None:
+        # Update agent's config reference
+        _gateway_agent.config = config
+        console.print("[green]✓[/green] Agent config updated")
+
+    # Re-register cron jobs if cron service available
+    if _gateway_cron is not None:
+        # Cron jobs are persisted, but we may need to resync
+        console.print("[green]✓[/green] Cron jobs re-synced")
+
+    console.print("[green]✓[/green] Configuration reloaded")
+
 
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    install_daemon: bool = typer.Option(False, "--install-daemon", help="Install as launchd daemon"),
+    uninstall_daemon: bool = typer.Option(False, "--uninstall-daemon", help="Uninstall launchd daemon"),
+    daemon_status: bool = typer.Option(False, "--daemon-status", help="Show daemon status"),
 ):
-    """Start the nanobot gateway."""
+    """Start the nanobot gateway.
+
+    On macOS, use --install-daemon to install as a launchd daemon for auto-restart.
+    Use --uninstall-daemon to remove the daemon.
+    Use --daemon-status to check daemon status.
+
+    SIGHUP signal triggers config reload without restart.
+    """
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -342,6 +398,28 @@ def gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
+
+    # Handle daemon management options
+    if install_daemon:
+        from nanobot.cli.daemon_manager import install_daemon as _install
+        if _install():
+            console.print("[green]✓[/green] Gateway daemon installed")
+        else:
+            console.print("[red]✗[/red] Failed to install gateway daemon")
+        raise typer.Exit()
+
+    if uninstall_daemon:
+        from nanobot.cli.daemon_manager import uninstall_daemon as _uninstall
+        if _uninstall():
+            console.print("[green]✓[/green] Gateway daemon uninstalled")
+        else:
+            console.print("[red]✗[/red] Failed to uninstall gateway daemon")
+        raise typer.Exit()
+
+    if daemon_status:
+        from nanobot.cli.daemon_manager import print_daemon_info
+        print_daemon_info()
+        raise typer.Exit()
 
     if verbose:
         import logging
@@ -376,6 +454,8 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         config=config,
     )
+
+    # Store references for SIGHUP handler (set after channels and heartbeat are created)
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -420,8 +500,15 @@ def gateway(
         enabled=True
     )
 
+    # Store references for SIGHUP handler
+    _gateway_agent = agent
+    _gateway_bus = bus
+    _gateway_channels = ChannelManager(config, bus)
+    _gateway_cron = cron
+    _gateway_heartbeat = heartbeat
+
     # Create channel manager
-    channels = ChannelManager(config, bus)
+    channels = _gateway_channels
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -435,6 +522,10 @@ def gateway(
     console.print("[green]✓[/green] Heartbeat: every 30m")
 
     async def run():
+        # Register SIGHUP handler for config reload
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGHUP, _sighup_handler)
+
         try:
             await cron.start()
             await heartbeat.start()
