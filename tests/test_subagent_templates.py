@@ -178,3 +178,42 @@ class TestTemplateSelection:
         tool = SpawnTool(manager=manager, policy_manager=policy_manager)
 
         assert "template" in tool.parameters["properties"]
+
+    def test_nanobot_coder_template_exists_and_contains_key_phrases(
+        self,
+        tmp_path: Path,
+        mock_provider: LLMProvider,
+        mock_bus: MessageBus,
+    ) -> None:
+        """Test that nanobot-coder template exists and contains key phrases."""
+        from nanobot.agent.subagent import SUBAGENT_TEMPLATES
+
+        # Confirm nanobot-coder is in SUBAGENT_TEMPLATES
+        assert "nanobot-coder" in SUBAGENT_TEMPLATES
+
+        # Confirm template is a non-empty string
+        template = SUBAGENT_TEMPLATES["nanobot-coder"]
+        assert isinstance(template, str)
+        assert len(template) > 0
+
+        # Confirm template contains key phrases
+        assert "nanobot/" in template
+        assert "ruff" in template
+        assert "TYPE_CHECKING" in template
+        assert "AsyncMock" in template
+
+        # Verify template can be used in prompt building
+        workspace_dir = tmp_path / "workspace"
+        workspace_dir.mkdir()
+        db_path = tmp_path / "test.db"
+
+        manager = SubagentManager(
+            provider=mock_provider,
+            workspace=workspace_dir,
+            bus=mock_bus,
+            model="zai-org/glm-4.7-flash",
+            db_path=db_path,
+        )
+
+        result = manager._build_subagent_prompt("edit nanobot core", template="nanobot-coder")
+        assert "nanobot core contributor" in result.lower()
