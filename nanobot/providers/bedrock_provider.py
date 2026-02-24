@@ -6,13 +6,16 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
+# third-party
 import boto3
 from botocore.config import Config as BotocoreConfig
+import botocore.exceptions
 from loguru import logger
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+# first-party
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -23,6 +26,7 @@ class BedrockProvider(LLMProvider):
         self,
         region_name: str = "us-east-1",
         default_model: str = "us.anthropic.claude-sonnet-4-6",
+        fallback_models: list[str] | None = None,
     ):
         self.region_name = region_name
         self.default_model = default_model
@@ -32,10 +36,7 @@ class BedrockProvider(LLMProvider):
             config=BotocoreConfig(read_timeout=300, connect_timeout=30),
         )
         # Tier-3 fallback chain: models to try if primary fails
-        self.fallback_models: list[str] = [
-            "us.anthropic.claude-sonnet-4-6",
-            "us.anthropic.claude-opus-4-6-v1",
-        ]
+        self.fallback_models: list[str] = fallback_models or []
 
     def get_default_model(self) -> str:
         """Get the default model for this provider."""
@@ -231,14 +232,20 @@ class BedrockProvider(LLMProvider):
         output = response.get("output", {}).get("message", {})
         content_blocks = output.get("content", [])
 
-        text = None
+        text_parts: list[str] = []
         tool_calls: list[ToolCallRequest] = []
 
         for block in content_blocks:
             if "text" in block:
-                text = block["text"]
+                text_parts.append(block["text"])
             elif "reasoningContent" in block:
-                pass  # skip reasoning/thinking blocks
+                reasoning = block["reasoningContent"]
+                # Use reasoning text as fallback if no text block found yet
+                if not text_parts:
+                    thinking = reasoning.get("reasoningText", {})
+                    text = thinking.get("text") if isinstance(thinking, dict) else None
+                    if text:
+                        text_parts.append(text)
             elif "toolUse" in block:
                 tool_use = block["toolUse"]
                 tool_calls.append(ToolCallRequest(
@@ -246,6 +253,8 @@ class BedrockProvider(LLMProvider):
                     name=tool_use.get("name", ""),
                     arguments=tool_use.get("input", {}),
                 ))
+
+        text = "\n".join(text_parts) if text_parts else None
 
         usage = response.get("usage", {})
         usage_dict = {
@@ -268,9 +277,10 @@ class BedrockProvider(LLMProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         temperature: float = 0.7,
         stream: bool = False,
+        additional_fields: dict[str, Any] | None = None,
     ) -> LLMResponse | AsyncGenerator[str, None]:
         """Send a chat completion request to Bedrock.
 
@@ -292,7 +302,7 @@ class BedrockProvider(LLMProvider):
 
         if stream:
             return self._chat_stream(
-                bedrock_messages, system_prompts, bedrock_tools, model_id, max_tokens, temperature
+                bedrock_messages, system_prompts, bedrock_tools, model_id, max_tokens, temperature, additional_fields
             )
 
         # Tier-3 fallback: try primary model, then fallback models on retryable errors
@@ -304,7 +314,7 @@ class BedrockProvider(LLMProvider):
         for try_model in models_to_try:
             try:
                 response = await self._converse_with_model(
-                    bedrock_messages, system_prompts, bedrock_tools, try_model, max_tokens, temperature
+                    bedrock_messages, system_prompts, bedrock_tools, try_model, max_tokens, temperature, additional_fields
                 )
                 return response
             except Exception as e:
@@ -312,9 +322,11 @@ class BedrockProvider(LLMProvider):
                 # Check if this is a retryable exception
                 if not self._is_retryable_exception(e):
                     # Non-retryable error: fail immediately
+                    logger.error("Bedrock: non-retryable error from model {}: {}", try_model, e)
                     raise
 
         # All models failed: raise the last exception
+        logger.error("Bedrock: all models failed (tried {}). Last error: {}", models_to_try, last_exception)
         raise last_exception
 
     async def _converse_with_model(
@@ -325,6 +337,7 @@ class BedrockProvider(LLMProvider):
         model_id: str,
         max_tokens: int,
         temperature: float,
+        additional_fields: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Execute a single converse call and return parsed response."""
         def _converse() -> dict[str, Any]:
@@ -340,6 +353,8 @@ class BedrockProvider(LLMProvider):
                 kwargs["system"] = system_prompts
             if bedrock_tools:
                 kwargs["toolConfig"] = {"tools": bedrock_tools}
+            if additional_fields:
+                kwargs["additionalModelRequestFields"] = additional_fields
 
             return self._client.converse(**kwargs)
 
@@ -348,19 +363,15 @@ class BedrockProvider(LLMProvider):
 
     def _is_retryable_exception(self, exception: Exception) -> bool:
         """Check if an exception is retryable (should trigger fallback)."""
-        exception_name = getattr(exception, "__class__", None)
-        if exception_name:
-            exception_name = exception_name.__name__
-        else:
-            exception_name = type(exception).__name__
-
-        retryable_names = {
-            "ThrottlingException",
-            "ModelStreamErrorException",
-            "ServiceUnavailableException",
-            "InternalServerException",
-        }
-        return exception_name in retryable_names
+        if isinstance(exception, botocore.exceptions.ClientError):
+            error_code = exception.response.get("Error", {}).get("Code", "")
+            return error_code in {
+                "ThrottlingException",
+                "ModelStreamErrorException",
+                "ServiceUnavailableException",
+                "InternalServerException",
+            }
+        return False
 
     async def _chat_stream(
         self,
@@ -370,6 +381,7 @@ class BedrockProvider(LLMProvider):
         model_id: str,
         max_tokens: int,
         temperature: float,
+        additional_fields: dict[str, Any] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream chat completions from Bedrock.
 
@@ -388,6 +400,8 @@ class BedrockProvider(LLMProvider):
             kwargs["system"] = system_prompts
         if bedrock_tools:
             kwargs["toolConfig"] = {"tools": bedrock_tools}
+        if additional_fields:
+            kwargs["additionalModelRequestFields"] = additional_fields
 
         def _converse_stream() -> dict[str, Any]:
             return self._client.converse_stream(**kwargs)
@@ -396,21 +410,29 @@ class BedrockProvider(LLMProvider):
         stream = response.get("stream")
 
         if stream:
+            text_yielded = False
             for event in stream:
                 if "contentBlockDelta" in event:
                     delta = event["contentBlockDelta"].get("delta", {})
                     if "text" in delta:
+                        text_yielded = True
                         yield delta["text"]
+                    elif "reasoningContent" in delta:
+                        pass  # skip reasoning deltas in stream
                 elif "messageStop" in event:
                     # End of stream
                     break
                 elif "metadata" in event:
                     # Token usage metadata - can be logged but doesn't yield text
                     pass
+            if not text_yielded:
+                logger.warning("Bedrock stream: no text content yielded (model may have emitted only reasoning blocks)")
 
     async def get_models(self) -> list[str]:
-        """Return static list of supported models."""
+        """Return static list of supported Bedrock models."""
         return [
             "us.anthropic.claude-sonnet-4-6",
             "us.anthropic.claude-opus-4-6-v1",
+            "minimax.minimax-m2.1",
+            "minimax.minimax-m2",
         ]
