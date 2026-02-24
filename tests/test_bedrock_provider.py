@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
+import botocore.exceptions
 import pytest
 
 from nanobot.providers.bedrock_provider import BedrockProvider
@@ -369,8 +371,9 @@ class TestBedrockProvider:
 
             # Both models should have been tried
             assert mock_client.converse.call_count == 2
-            # Verify the last exception is ModelStreamErrorException
-            assert type(exc_info.value).__name__ == "ModelStreamErrorException"
+            # Verify the last exception is ModelStreamErrorException (check error code)
+            assert isinstance(exc_info.value, botocore.exceptions.ClientError)
+            assert exc_info.value.response["Error"]["Code"] == "ModelStreamErrorException"
 
     @pytest.mark.asyncio
     async def test_tier3_fallback_non_retryable_error(self):
@@ -402,16 +405,19 @@ class TestBedrockProvider:
 
             # Should fail immediately without retrying
             assert mock_client.converse.call_count == 1
-            # Verify the exception is InvalidRequestException
-            assert type(exc_info.value).__name__ == "InvalidRequestException"
+            # Verify the exception is InvalidRequestException (check error code)
+            assert isinstance(exc_info.value, botocore.exceptions.ClientError)
+            assert exc_info.value.response["Error"]["Code"] == "InvalidRequestException"
 
     @staticmethod
-    def _mock_bedrock_exception(exception_name: str, message: str) -> Exception:
+    def _mock_bedrock_exception(exception_name: str, message: str) -> botocore.exceptions.ClientError:
         """Create a mock Bedrock exception."""
 
-        class MockBedrockError(Exception):
-            pass
-
-        exception = MockBedrockError(message)
-        exception.__class__.__name__ = exception_name
+        error_response = {
+            "Error": {
+                "Code": exception_name,
+                "Message": message,
+            }
+        }
+        exception = botocore.exceptions.ClientError(error_response, exception_name)
         return exception

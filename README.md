@@ -825,6 +825,44 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 <details>
+<summary><b>Gateway Daemon (macOS)</b></summary>
+
+**Auto-restart with launchd**
+
+On macOS, install the gateway as a launchd daemon for automatic restart on crash:
+
+```bash
+nanobot gateway --install-daemon
+```
+
+This creates a launchd plist at `~/Library/LaunchAgents/com.nanobot.gateway.plist` with `KeepAlive=true`.
+
+**Check daemon status:**
+```bash
+nanobot gateway --daemon-status
+```
+
+**Uninstall daemon:**
+```bash
+nanobot gateway --uninstall-daemon
+```
+
+**SIGHUP config reload**
+
+Without restart, send `SIGHUP` to reload configuration:
+```bash
+kill -SIGHUP $(pgrep -f "nanobot gateway")
+```
+
+This triggers:
+- Re-read config from disk
+- Update agent with new settings
+- Re-register cron jobs
+
+> **Note:** SIGHUP reload is only available when running the gateway directly (not through launchd, which handles restarts).
+</details>
+
+<details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>
 
 ```bash
