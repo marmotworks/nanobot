@@ -38,6 +38,36 @@ def get_active_labels(db_path: Path) -> set[str]:
         return set()
 
 
+def get_completed_labels(db_path: Path) -> set[str]:
+    """Return set of labels for completed subagents from registry."""
+    if not db_path.exists():
+        return set()
+    try:
+        conn = sqlite3.connect(str(db_path))
+        rows = conn.execute(
+            "SELECT label FROM subagents WHERE status = 'completed'"
+        ).fetchall()
+        conn.close()
+        return {row[0] for row in rows if row[0]}
+    except Exception:
+        return set()
+
+
+def get_failed_labels(db_path: Path) -> set[str]:
+    """Return set of labels for failed subagents from registry."""
+    if not db_path.exists():
+        return set()
+    try:
+        conn = sqlite3.connect(str(db_path))
+        rows = conn.execute(
+            "SELECT label FROM subagents WHERE status IN ('failed', 'lost')"
+        ).fetchall()
+        conn.close()
+        return {row[0] for row in rows if row[0]}
+    except Exception:
+        return set()
+
+
 def get_milestone_status(db_path: Path, milestone_num: str) -> str | None:
     """Return the most recent status for a milestone from the registry.
 

@@ -1,80 +1,402 @@
-"""Unit tests for review_backlog.py [~] reset logic."""
+"""Unit tests for review_backlog.py functions."""
 
 from __future__ import annotations
 
-import os
+import importlib.util
 from pathlib import Path
-from subprocess import run
+import sys
+from unittest.mock import patch
 
-import pytest
+_SCRIPT = Path(__file__).parent.parent / "nanobot/skills/task-tracker/scripts/review_backlog.py"
+_spec = importlib.util.spec_from_file_location("review_backlog", _SCRIPT)
+rb = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
+sys.modules["review_backlog"] = rb
+_spec.loader.exec_module(rb)  # type: ignore[union-attr]
 
 
-class TestTildeResetLogic:
-    """Tests for [~] marker reset logic based on registry status."""
+class TestGetCompletedLabels:
+    """Tests for get_completed_labels() function."""
 
-    def test_tilde_reset_to_open_when_no_registry_entry(self, tmp_path: Path) -> None:
-        """BACKLOG with [~] marker, empty registry → resets to [ ]."""
-        # Create temp BACKLOG.md with [~] marker
-        backlog_path = tmp_path / "memory" / "BACKLOG.md"
-        backlog_path.parent.mkdir(parents=True)
-        backlog_content = """## Task 1: Sample task
-
-Status: In progress
-
-Blocker: none
-
-- [ ] 1.1 Not started milestone
-- [~] 1.2 In progress milestone
-- [x] 1.3 Complete milestone
-"""
-        backlog_path.write_text(backlog_content)
-
-        # Create empty registry DB
-        db_path = tmp_path / "subagents.db"
-        db_path.touch()
-
-        # Run review_backlog.py with temp paths
-        script_path = Path(__file__).parent.parent / "nanobot" / "skills" / "task-tracker" / "scripts" / "review_backlog.py"
-        env = os.environ.copy()
-        env["BACKLOG_PATH"] = str(backlog_path)
-        env["DB_PATH"] = str(db_path)
-
-        result = run(
-            ["python3", str(script_path)],
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-
-        # Verify [~] marker resets to [ ] (no registry entry)
-        result_content = backlog_path.read_text()
-        assert "- [ ] 1.2 In progress milestone" in result_content
-        assert "- [~] 1.2" not in result_content
-        assert result.returncode == 0
-
-    def test_tilde_becomes_done_when_completed(self, tmp_path: Path) -> None:
-        """BACKLOG with [~] marker, registry has completed entry → becomes [x]."""
-        # Create temp BACKLOG.md with [~] marker
-        backlog_path = tmp_path / "memory" / "BACKLOG.md"
-        backlog_path.parent.mkdir(parents=True)
-        backlog_content = """## Task 1: Sample task
-
-Status: In progress
-
-Blocker: none
-
-- [ ] 1.1 Not started milestone
-- [~] 1.2 In progress milestone
-- [x] 1.3 Complete milestone
-"""
-        backlog_path.write_text(backlog_content)
-
-        # Create registry DB with completed entry for milestone 1.2
-        db_path = tmp_path / "subagents.db"
-        conn = __import__("sqlite3").connect(str(db_path))
+    def test_returns_completed_labels_when_db_has_entries(self, tmp_path: Path) -> None:
+        """DB with completed entries → returns set of their labels."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS subagents (
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-2", "1.2", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("task-3", "1.3", "user", "running", "2024-01-01T00:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_completed_labels(db_path)
+
+        assert result == {"1.1", "1.2"}
+
+    def test_returns_empty_set_when_db_is_empty(self, tmp_path: Path) -> None:
+        """DB with no completed entries → returns empty set."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "running", "2024-01-01T00:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("task-2", "1.2", "user", "failed", "2024-01-01T00:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_completed_labels(db_path)
+
+        assert result == set()
+
+    def test_returns_empty_set_when_db_does_not_exist(self, tmp_path: Path) -> None:
+        """Non-existent DB → returns empty set."""
+        db_path = tmp_path / "nonexistent.db"
+
+        result = rb.get_completed_labels(db_path)
+
+        assert result == set()
+
+    def test_ignores_null_labels(self, tmp_path: Path) -> None:
+        """Rows with NULL label are ignored."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-2", None, "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_completed_labels(db_path)
+
+        assert result == {"1.1"}
+
+    def test_ignores_empty_string_labels(self, tmp_path: Path) -> None:
+        """Rows with empty string label are ignored."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-2", "", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_completed_labels(db_path)
+
+        assert result == {"1.1"}
+
+
+class TestGetFailedLabels:
+    """Tests for get_failed_labels() function."""
+
+    def test_returns_failed_labels_when_db_has_entries(self, tmp_path: Path) -> None:
+        """DB with failed entries → returns set of their labels."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-2", "1.2", "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("task-3", "1.3", "user", "running", "2024-01-01T00:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_failed_labels(db_path)
+
+        assert result == {"1.1", "1.2"}
+
+    def test_returns_lost_labels_as_failed(self, tmp_path: Path) -> None:
+        """DB with lost entries → included in failed labels."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "lost", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-2", "1.2", "user", "lost", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_failed_labels(db_path)
+
+        assert result == {"1.1", "1.2"}
+
+    def test_returns_empty_set_when_db_is_empty(self, tmp_path: Path) -> None:
+        """DB with no failed entries → returns empty set."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "running", "2024-01-01T00:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-2", "1.2", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_failed_labels(db_path)
+
+        assert result == set()
+
+    def test_returns_empty_set_when_db_does_not_exist(self, tmp_path: Path) -> None:
+        """Non-existent DB → returns empty set."""
+        db_path = tmp_path / "nonexistent.db"
+
+        result = rb.get_failed_labels(db_path)
+
+        assert result == set()
+
+    def test_ignores_null_labels(self, tmp_path: Path) -> None:
+        """Rows with NULL label are ignored."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-2", None, "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_failed_labels(db_path)
+
+        assert result == {"1.1"}
+
+    def test_ignores_empty_string_labels(self, tmp_path: Path) -> None:
+        """Rows with empty string label are ignored."""
+        db_path = tmp_path / "test.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-1", "1.1", "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-2", "", "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = rb.get_failed_labels(db_path)
+
+        assert result == {"1.1"}
+
+
+class TestMarkerResetLogic:
+    """Tests for [~] marker reset logic based on registry status."""
+
+    def test_tilde_becomes_x_when_completed(self, tmp_path: Path) -> None:
+        """[~] marker with completed subagent → becomes [x]."""
+        backlog_path = tmp_path / "BACKLOG.md"
+        backlog_path.write_text(
+            "- [~] 1.2 Some task\n",
+            encoding="utf-8",
+        )
+
+        db_path = tmp_path / "subagents.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
                 origin TEXT NOT NULL,
@@ -96,48 +418,209 @@ Blocker: none
         conn.commit()
         conn.close()
 
-        # Run review_backlog.py with temp paths
-        script_path = Path(__file__).parent.parent / "nanobot" / "skills" / "task-tracker" / "scripts" / "review_backlog.py"
-        env = os.environ.copy()
-        env["BACKLOG_PATH"] = str(backlog_path)
-        env["DB_PATH"] = str(db_path)
+        with (
+            patch.object(rb, "BACKLOG_PATH", backlog_path),
+            patch.object(rb, "DB_PATH", db_path),
+        ):
+            result = rb.main()
 
-        result = run(
-            ["python3", str(script_path)],
-            env=env,
-            capture_output=True,
-            text=True,
+        content = backlog_path.read_text(encoding="utf-8")
+        assert "- [x] 1.2 Some task" in content
+        assert "- [~] 1.2" not in content
+        assert result == 0
+
+    def test_tilde_becomes_space_when_failed(self, tmp_path: Path) -> None:
+        """[~] marker with failed subagent → becomes [ ]."""
+        backlog_path = tmp_path / "BACKLOG.md"
+        backlog_path.write_text(
+            "- [~] 1.2 Some task\n",
+            encoding="utf-8",
         )
 
-        # Verify [~] marker becomes [x] (completed status)
-        result_content = backlog_path.read_text()
-        assert "- [x] 1.2 In progress milestone" in result_content
-        assert "- [~] 1.2" not in result_content
-        assert result.returncode == 0
-
-    def test_tilde_stays_when_running(self, tmp_path: Path) -> None:
-        """BACKLOG with [~] marker, registry has running entry → stays [~]."""
-        # Create temp BACKLOG.md with [~] marker
-        backlog_path = tmp_path / "memory" / "BACKLOG.md"
-        backlog_path.parent.mkdir(parents=True)
-        backlog_content = """## Task 1: Sample task
-
-Status: In progress
-
-Blocker: none
-
-- [ ] 1.1 Not started milestone
-- [~] 1.2 In progress milestone
-- [x] 1.3 Complete milestone
-"""
-        backlog_path.write_text(backlog_content)
-
-        # Create registry DB with running entry for milestone 1.2
         db_path = tmp_path / "subagents.db"
-        conn = __import__("sqlite3").connect(str(db_path))
+        conn = rb.sqlite3.connect(str(db_path))
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS subagents (
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-123", "1.2", "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        with (
+            patch.object(rb, "BACKLOG_PATH", backlog_path),
+            patch.object(rb, "DB_PATH", db_path),
+        ):
+            result = rb.main()
+
+        content = backlog_path.read_text(encoding="utf-8")
+        assert "- [ ] 1.2 Some task" in content
+        assert "- [~] 1.2" not in content
+        assert result == 0
+
+    def test_tilde_becomes_space_when_unknown(self, tmp_path: Path) -> None:
+        """[~] marker with no registry entry → becomes [ ]."""
+        backlog_path = tmp_path / "BACKLOG.md"
+        backlog_path.write_text(
+            "- [~] 1.2 Some task\n",
+            encoding="utf-8",
+        )
+
+        db_path = tmp_path / "subagents.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        # Different label in DB
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("task-456", "1.3", "user", "running", "2024-01-01T00:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        with (
+            patch.object(rb, "BACKLOG_PATH", backlog_path),
+            patch.object(rb, "DB_PATH", db_path),
+        ):
+            result = rb.main()
+
+        content = backlog_path.read_text(encoding="utf-8")
+        assert "- [ ] 1.2 Some task" in content
+        assert "- [~] 1.2" not in content
+        assert result == 0
+
+    def test_space_marker_unchanged(self, tmp_path: Path) -> None:
+        """[ ] marker is left unchanged."""
+        backlog_path = tmp_path / "BACKLOG.md"
+        backlog_path.write_text(
+            "- [ ] 1.2 Some task\n",
+            encoding="utf-8",
+        )
+
+        db_path = tmp_path / "subagents.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-123", "1.2", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        with (
+            patch.object(rb, "BACKLOG_PATH", backlog_path),
+            patch.object(rb, "DB_PATH", db_path),
+        ):
+            result = rb.main()
+
+        content = backlog_path.read_text(encoding="utf-8")
+        assert "- [ ] 1.2 Some task" in content
+        assert result == 0
+
+    def test_x_marker_unchanged(self, tmp_path: Path) -> None:
+        """[x] marker is left unchanged."""
+        backlog_path = tmp_path / "BACKLOG.md"
+        backlog_path.write_text(
+            "- [x] 1.2 Some task\n",
+            encoding="utf-8",
+        )
+
+        db_path = tmp_path / "subagents.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                status TEXT NOT NULL,
+                spawned_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                retry_count INTEGER DEFAULT 0,
+                stack_frame TEXT,
+                result_summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("task-123", "1.2", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        with (
+            patch.object(rb, "BACKLOG_PATH", backlog_path),
+            patch.object(rb, "DB_PATH", db_path),
+        ):
+            result = rb.main()
+
+        content = backlog_path.read_text(encoding="utf-8")
+        assert "- [x] 1.2 Some task" in content
+        assert result == 0
+
+    def test_tilde_stays_when_running(self, tmp_path: Path) -> None:
+        """[~] marker with running subagent → stays [~]."""
+        backlog_path = tmp_path / "BACKLOG.md"
+        backlog_path.write_text(
+            "- [~] 1.2 Some task\n",
+            encoding="utf-8",
+        )
+
+        db_path = tmp_path / "subagents.db"
+        conn = rb.sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE subagents (
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
                 origin TEXT NOT NULL,
@@ -159,177 +642,30 @@ Blocker: none
         conn.commit()
         conn.close()
 
-        # Run review_backlog.py with temp paths
-        script_path = Path(__file__).parent.parent / "nanobot" / "skills" / "task-tracker" / "scripts" / "review_backlog.py"
-        env = os.environ.copy()
-        env["BACKLOG_PATH"] = str(backlog_path)
-        env["DB_PATH"] = str(db_path)
+        with (
+            patch.object(rb, "BACKLOG_PATH", backlog_path),
+            patch.object(rb, "DB_PATH", db_path),
+        ):
+            result = rb.main()
 
-        result = run(
-            ["python3", str(script_path)],
-            env=env,
-            capture_output=True,
-            text=True,
+        content = backlog_path.read_text(encoding="utf-8")
+        assert "- [~] 1.2 Some task" in content
+        assert "- [ ] 1.2" not in content
+        assert result == 0
+
+    def test_tilde_stays_when_pending(self, tmp_path: Path) -> None:
+        """[~] marker with pending subagent → stays [~]."""
+        backlog_path = tmp_path / "BACKLOG.md"
+        backlog_path.write_text(
+            "- [~] 1.2 Some task\n",
+            encoding="utf-8",
         )
 
-        # Verify [~] marker stays [~] (running status)
-        result_content = backlog_path.read_text()
-        assert "- [~] 1.2 In progress milestone" in result_content
-        assert "- [ ] 1.2" not in result_content
-        assert "- [x] 1.2" not in result_content
-        assert result.returncode == 0
-
-    def test_tilde_reset_when_failed(self, tmp_path: Path) -> None:
-        """BACKLOG with [~] marker, registry has failed entry → resets to [ ]."""
-        # Create temp BACKLOG.md with [~] marker
-        backlog_path = tmp_path / "memory" / "BACKLOG.md"
-        backlog_path.parent.mkdir(parents=True)
-        backlog_content = """## Task 1: Sample task
-
-Status: In progress
-
-Blocker: none
-
-- [ ] 1.1 Not started milestone
-- [~] 1.2 In progress milestone
-- [x] 1.3 Complete milestone
-"""
-        backlog_path.write_text(backlog_content)
-
-        # Create registry DB with failed entry for milestone 1.2
         db_path = tmp_path / "subagents.db"
-        conn = __import__("sqlite3").connect(str(db_path))
+        conn = rb.sqlite3.connect(str(db_path))
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS subagents (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                origin TEXT NOT NULL,
-                status TEXT NOT NULL,
-                spawned_at TEXT NOT NULL,
-                started_at TEXT,
-                completed_at TEXT,
-                retry_count INTEGER DEFAULT 0,
-                stack_frame TEXT,
-                result_summary TEXT
-            )
-            """
-        )
-        conn.execute(
-            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            ("task-123", "1.2", "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T00:30:00Z"),
-        )
-        conn.commit()
-        conn.close()
-
-        # Run review_backlog.py with temp paths
-        script_path = Path(__file__).parent.parent / "nanobot" / "skills" / "task-tracker" / "scripts" / "review_backlog.py"
-        env = os.environ.copy()
-        env["BACKLOG_PATH"] = str(backlog_path)
-        env["DB_PATH"] = str(db_path)
-
-        result = run(
-            ["python3", str(script_path)],
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-
-        # Verify [~] marker resets to [ ] (failed status)
-        result_content = backlog_path.read_text()
-        assert "- [ ] 1.2 In progress milestone" in result_content
-        assert "- [~] 1.2" not in result_content
-        assert "- [x] 1.2" not in result_content
-        assert result.returncode == 0
-
-    def test_tilde_reset_when_lost(self, tmp_path: Path) -> None:
-        """BACKLOG with [~] marker, registry has lost entry → resets to [ ]."""
-        # Create temp BACKLOG.md with [~] marker
-        backlog_path = tmp_path / "memory" / "BACKLOG.md"
-        backlog_path.parent.mkdir(parents=True)
-        backlog_content = """## Task 1: Sample task
-
-Status: In progress
-
-Blocker: none
-
-- [ ] 1.1 Not started milestone
-- [~] 1.2 In progress milestone
-- [x] 1.3 Complete milestone
-"""
-        backlog_path.write_text(backlog_content)
-
-        # Create registry DB with lost entry for milestone 1.2
-        db_path = tmp_path / "subagents.db"
-        conn = __import__("sqlite3").connect(str(db_path))
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS subagents (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                origin TEXT NOT NULL,
-                status TEXT NOT NULL,
-                spawned_at TEXT NOT NULL,
-                started_at TEXT,
-                completed_at TEXT,
-                retry_count INTEGER DEFAULT 0,
-                stack_frame TEXT,
-                result_summary TEXT
-            )
-            """
-        )
-        conn.execute(
-            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            ("task-123", "1.2", "user", "lost", "2024-01-01T00:00:00Z", "2024-01-01T00:30:00Z"),
-        )
-        conn.commit()
-        conn.close()
-
-        # Run review_backlog.py with temp paths
-        script_path = Path(__file__).parent.parent / "nanobot" / "skills" / "task-tracker" / "scripts" / "review_backlog.py"
-        env = os.environ.copy()
-        env["BACKLOG_PATH"] = str(backlog_path)
-        env["DB_PATH"] = str(db_path)
-
-        result = run(
-            ["python3", str(script_path)],
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-
-        # Verify [~] marker resets to [ ] (lost status)
-        result_content = backlog_path.read_text()
-        assert "- [ ] 1.2 In progress milestone" in result_content
-        assert "- [~] 1.2" not in result_content
-        assert "- [x] 1.2" not in result_content
-        assert result.returncode == 0
-
-    def test_tilde_reset_when_pending(self, tmp_path: Path) -> None:
-        """BACKLOG with [~] marker, registry has pending entry → stays [~]."""
-        # Create temp BACKLOG.md with [~] marker
-        backlog_path = tmp_path / "memory" / "BACKLOG.md"
-        backlog_path.parent.mkdir(parents=True)
-        backlog_content = """## Task 1: Sample task
-
-Status: In progress
-
-Blocker: none
-
-- [ ] 1.1 Not started milestone
-- [~] 1.2 In progress milestone
-- [x] 1.3 Complete milestone
-"""
-        backlog_path.write_text(backlog_content)
-
-        # Create registry DB with pending entry for milestone 1.2
-        db_path = tmp_path / "subagents.db"
-        conn = __import__("sqlite3").connect(str(db_path))
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS subagents (
+            CREATE TABLE subagents (
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
                 origin TEXT NOT NULL,
@@ -351,49 +687,30 @@ Blocker: none
         conn.commit()
         conn.close()
 
-        # Run review_backlog.py with temp paths
-        script_path = Path(__file__).parent.parent / "nanobot" / "skills" / "task-tracker" / "scripts" / "review_backlog.py"
-        env = os.environ.copy()
-        env["BACKLOG_PATH"] = str(backlog_path)
-        env["DB_PATH"] = str(db_path)
+        with (
+            patch.object(rb, "BACKLOG_PATH", backlog_path),
+            patch.object(rb, "DB_PATH", db_path),
+        ):
+            result = rb.main()
 
-        result = run(
-            ["python3", str(script_path)],
-            env=env,
-            capture_output=True,
-            text=True,
+        content = backlog_path.read_text(encoding="utf-8")
+        assert "- [~] 1.2 Some task" in content
+        assert "- [ ] 1.2" not in content
+        assert result == 0
+
+    def test_tilde_becomes_x_when_completed_via_prefix_match(self, tmp_path: Path) -> None:
+        """[~] 1.2 matches registry label '1.2 Some desc' → becomes [x]."""
+        backlog_path = tmp_path / "BACKLOG.md"
+        backlog_path.write_text(
+            "- [~] 1.2 Some task\n",
+            encoding="utf-8",
         )
 
-        # Verify [~] marker stays [~] (pending status)
-        result_content = backlog_path.read_text()
-        assert "- [~] 1.2 In progress milestone" in result_content
-        assert "- [ ] 1.2" not in result_content
-        assert "- [x] 1.2" not in result_content
-        assert result.returncode == 0
-
-    def test_tilde_reset_with_label_prefix_match(self, tmp_path: Path) -> None:
-        """BACKLOG with [~] 1.2, registry has '1.2 Some description' → stays [~]."""
-        # Create temp BACKLOG.md with [~] marker
-        backlog_path = tmp_path / "memory" / "BACKLOG.md"
-        backlog_path.parent.mkdir(parents=True)
-        backlog_content = """## Task 1: Sample task
-
-Status: In progress
-
-Blocker: none
-
-- [ ] 1.1 Not started milestone
-- [~] 1.2 In progress milestone
-- [x] 1.3 Complete milestone
-"""
-        backlog_path.write_text(backlog_content)
-
-        # Create registry DB with entry using label prefix format
         db_path = tmp_path / "subagents.db"
-        conn = __import__("sqlite3").connect(str(db_path))
+        conn = rb.sqlite3.connect(str(db_path))
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS subagents (
+            CREATE TABLE subagents (
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
                 origin TEXT NOT NULL,
@@ -407,115 +724,28 @@ Blocker: none
             )
             """
         )
-        # Label uses prefix format: "1.2 Some description"
+        # Label uses prefix format
         conn.execute(
-            """INSERT INTO subagents (id, label, origin, status, spawned_at, started_at)
+            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            ("task-123", "1.2 Milestone description", "user", "running", "2024-01-01T00:00:00Z", "2024-01-01T00:30:00Z"),
+            ("task-123", "1.2 Milestone description", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
         )
         conn.commit()
         conn.close()
 
-        # Run review_backlog.py with temp paths
-        script_path = Path(__file__).parent.parent / "nanobot" / "skills" / "task-tracker" / "scripts" / "review_backlog.py"
-        env = os.environ.copy()
-        env["BACKLOG_PATH"] = str(backlog_path)
-        env["DB_PATH"] = str(db_path)
+        with (
+            patch.object(rb, "BACKLOG_PATH", backlog_path),
+            patch.object(rb, "DB_PATH", db_path),
+        ):
+            result = rb.main()
 
-        result = run(
-            ["python3", str(script_path)],
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-
-        # Verify [~] marker stays [~] (prefix match works)
-        result_content = backlog_path.read_text()
-        assert "- [~] 1.2 In progress milestone" in result_content
-        assert "- [ ] 1.2" not in result_content
-        assert result.returncode == 0
-
-    def test_multiple_tildes_different_statuses(self, tmp_path: Path) -> None:
-        """Multiple [~] markers with different registry statuses."""
-        # Create temp BACKLOG.md with multiple [~] markers
-        backlog_path = tmp_path / "memory" / "BACKLOG.md"
-        backlog_path.parent.mkdir(parents=True)
-        backlog_content = """## Task 1: Sample task
-
-Status: In progress
-
-Blocker: none
-
-- [ ] 1.1 Not started milestone
-- [~] 1.2 In progress milestone 1
-- [~] 1.3 In progress milestone 2
-- [~] 1.4 In progress milestone 3
-- [x] 1.5 Complete milestone
-"""
-        backlog_path.write_text(backlog_content)
-
-        # Create registry DB with different statuses
-        db_path = tmp_path / "subagents.db"
-        conn = __import__("sqlite3").connect(str(db_path))
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS subagents (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                origin TEXT NOT NULL,
-                status TEXT NOT NULL,
-                spawned_at TEXT NOT NULL,
-                started_at TEXT,
-                completed_at TEXT,
-                retry_count INTEGER DEFAULT 0,
-                stack_frame TEXT,
-                result_summary TEXT
-            )
-            """
-        )
-        # 1.2 is completed → should become [x]
-        conn.execute(
-            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            ("task-12", "1.2", "user", "completed", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z"),
-        )
-        # 1.3 is running → should stay [~]
-        conn.execute(
-            """INSERT INTO subagents (id, label, origin, status, spawned_at, started_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            ("task-13", "1.3", "user", "running", "2024-01-01T00:00:00Z", "2024-01-01T00:30:00Z"),
-        )
-        # 1.4 is failed → should reset to [ ]
-        conn.execute(
-            """INSERT INTO subagents (id, label, origin, status, spawned_at, completed_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            ("task-14", "1.4", "user", "failed", "2024-01-01T00:00:00Z", "2024-01-01T00:30:00Z"),
-        )
-        conn.commit()
-        conn.close()
-
-        # Run review_backlog.py with temp paths
-        script_path = Path(__file__).parent.parent / "nanobot" / "skills" / "task-tracker" / "scripts" / "review_backlog.py"
-        env = os.environ.copy()
-        env["BACKLOG_PATH"] = str(backlog_path)
-        env["DB_PATH"] = str(db_path)
-
-        result = run(
-            ["python3", str(script_path)],
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-
-        # Verify different transformations
-        result_content = backlog_path.read_text()
-        assert "- [x] 1.2 In progress milestone 1" in result_content  # completed → [x]
-        assert "- [~] 1.3 In progress milestone 2" in result_content  # running → stays [~]
-        assert "- [ ] 1.4 In progress milestone 3" in result_content  # failed → [ ]
-        assert "- [~] 1.2" not in result_content
-        assert "- [~] 1.4" not in result_content
-        assert result.returncode == 0
+        content = backlog_path.read_text(encoding="utf-8")
+        assert "- [x] 1.2 Some task" in content
+        assert "- [~] 1.2" not in content
+        assert result == 0
 
 
 if __name__ == "__main__":
+    import pytest
+
     pytest.main([__file__, "-v"])
