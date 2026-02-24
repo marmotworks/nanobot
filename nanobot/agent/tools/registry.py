@@ -84,3 +84,8 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+-e 
+    def list_names(self) -> list[str]:
+        """Get list of registered tool names."""
+        return list(self._tools.keys())
+

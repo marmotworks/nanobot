@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "e4f3de8a",
+      "name": "Run git-sync local commit: GIT",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "atMs": null,
+        "everyMs": null,
+        "expr": "*/30 * * * *",
+        "tz": "America/Chicago"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "Run git-sync local commit: GIT_SYNC_NO_PUSH=1 bash /Users/mhall/Workspaces/nanobot/nanobot/skills/git-sync/git_sync.sh",
+        "deliver": true,
+        "channel": "discord",
+        "to": "1474969306612895978"
+      },
+      "state": {
+        "nextRunAtMs": 1771956000000,
+        "lastRunAtMs": 1771954200006,
+        "lastStatus": "ok",
+        "lastError": null
+      },
+      "createdAtMs": 1771738861513,
+      "updatedAtMs": 1771954280951,
+      "deleteAfterRun": false
+    },
+    {
+      "id": "bf1eedc7",
+      "name": "Run git-sync with push: bash /",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "atMs": null,
+        "everyMs": null,
+        "expr": "0 12 * * *",
+        "tz": "America/Chicago"
+      },
+      "payload": {
+        "kind": "agent_turn",
+        "message": "Run git-sync with push: bash /Users/mhall/Workspaces/nanobot/nanobot/skills/git-sync/git_sync.sh",
+        "deliver": true,
+        "channel": "discord",
+        "to": "1474969306612895978"
+      },
+      "state": {
+        "nextRunAtMs": 1771956000000,
+        "lastRunAtMs": 1771869602015,
+        "lastStatus": "ok",
+        "lastError": null
+      },
+      "createdAtMs": 1771738864172,
+      "updatedAtMs": 1771869606265,
+      "deleteAfterRun": false
+    }
+  ]
+}
