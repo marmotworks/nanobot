@@ -1,9 +1,8 @@
 """Gateway daemon management for macOS launchd."""
 
-import os
+from pathlib import Path
 import shutil
 import subprocess
-from pathlib import Path
 
 from rich.console import Console
 
@@ -24,20 +23,20 @@ def _get_source_plist_path() -> Path:
 
 def install_daemon() -> bool:
     """Install the nanobot gateway as a launchd daemon.
-    
+
     Returns:
         True if installation succeeded, False otherwise.
     """
     source_plist = _get_source_plist_path()
     target_plist = _get_plist_path()
-    
+
     if not source_plist.exists():
         console.print(f"[red]Source plist not found: {source_plist}[/red]")
         return False
-    
+
     # Create LaunchAgents directory if needed
     target_plist.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Copy plist to target location
     try:
         shutil.copy2(source_plist, target_plist)
@@ -45,10 +44,10 @@ def install_daemon() -> bool:
     except Exception as e:
         console.print(f"[red]Failed to copy plist: {e}[/red]")
         return False
-    
+
     # Load the daemon with launchctl
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["launchctl", "load", str(target_plist)],
             capture_output=True,
             text=True,
@@ -66,19 +65,19 @@ def install_daemon() -> bool:
 
 def uninstall_daemon() -> bool:
     """Uninstall the nanobot gateway launchd daemon.
-    
+
     Returns:
         True if uninstallation succeeded, False otherwise.
     """
     target_plist = _get_plist_path()
-    
+
     if not target_plist.exists():
         console.print("[yellow]Daemon not installed[/yellow]")
         return False
-    
+
     # Unload the daemon with launchctl
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["launchctl", "unload", str(target_plist)],
             capture_output=True,
             text=True,
@@ -91,7 +90,7 @@ def uninstall_daemon() -> bool:
     except FileNotFoundError:
         console.print("[red]launchctl not found. This tool only works on macOS.[/red]")
         return False
-    
+
     # Remove the plist file
     try:
         target_plist.unlink()
@@ -99,21 +98,21 @@ def uninstall_daemon() -> bool:
     except Exception as e:
         console.print(f"[yellow]Warning: Failed to remove plist: {e}[/yellow]")
         return False
-    
+
     return True
 
 
 def daemon_status() -> str:
     """Check the status of the nanobot gateway daemon.
-    
+
     Returns:
         Status string: 'running', 'stopped', or 'not_installed'.
     """
     target_plist = _get_plist_path()
-    
+
     if not target_plist.exists():
         return "not_installed"
-    
+
     try:
         result = subprocess.run(
             ["launchctl", "list", "com.nanobot.gateway"],
@@ -131,17 +130,17 @@ def daemon_status() -> str:
 def print_daemon_info():
     """Print information about the daemon setup."""
     from nanobot import __logo__
-    
+
     console.print(f"{__logo__} nanobot Gateway Daemon\n")
-    
+
     status = daemon_status()
     console.print(f"Status: [bold]{status}[/bold]\n")
-    
+
     if status != "not_installed":
         target_plist = _get_plist_path()
         console.print(f"Plist location: {target_plist}")
-        
+
         # Show log paths
         console.print("\nLog paths:")
-        console.print(f"  Standard output: ~/Library/Logs/nanobot/gateway.log")
-        console.print(f"  Standard error:  ~/Library/Logs/nanobot/gateway-error.log")
+        console.print("  Standard output: ~/Library/Logs/nanobot/gateway.log")
+        console.print("  Standard error:  ~/Library/Logs/nanobot/gateway-error.log")
