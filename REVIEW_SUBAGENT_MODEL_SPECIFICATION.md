@@ -249,10 +249,10 @@ def validate_model_selection(self, model: str, task_type: Optional[str] = None) 
 
 ```bash
 # Try to use forbidden model
-> spawn "Test task" model="zai-org/glm-4.7-flash"
+> spawn "Test task" model="nvidia/nemotron-3-nano"
 
 # Result:
-# Error: Model 'zai-org/glm-4.7-flash' is reserved for the main agent loop and cannot be used for subagents. Use 'zai-org/glm-4.7-flash' for the main agent, or choose a subagent model like 'qwen3-coder-next'.
+# Error: Model 'nvidia/nemotron-3-nano' is reserved for the main agent loop and cannot be used for subagents. Use 'nvidia/nemotron-3-nano' for the main agent, or choose a subagent model like 'qwen3-coder-next'.
 ```
 
 ### Example 5: Non-existent Model Error
@@ -262,23 +262,17 @@ def validate_model_selection(self, model: str, task_type: Optional[str] = None) 
 > spawn "Test task" model="nonexistent-model"
 
 # Result:
-# Error: Model 'nonexistent-model' is not available from the provider. Available models: qwen3-coder-next, zai-org/glm-4.7-flash, glm-4.6v-flash
+# Error: Model 'nonexistent-model' is not available from the provider. Available models: qwen3-coder-next, nvidia/nemotron-3-nano, glm-4.6v-flash
 ```
 
 ---
 
 ## 📊 Available Models
 
-Based on LM Studio v0 API:
-
-| Model | Context Length | Type | Publisher |
-|-------|---------------|------|-----------|
-| `qwen3-coder-next` | 262,144 (256k) | LLM | unsloth |
-| `zai-org/glm-4.7-flash` | 202,752 (~200k) | LLM | zai-org |
-| `glm-4.6v-flash` | 131,072 (128k) | VLM | unsloth |
+Based on LM Studio v0 API
 
 **Model Policies:**
-- `zai-org/glm-4.7-flash`: Main agent loop only (forbidden for subagents)
+- `nvidia/nemotron-3-nano`: Main agent loop only (forbidden for subagents)
 - `qwen3-coder-next`: Technical tasks (4 concurrent agents)
 - `glm-4.6v-flash`: Vision tasks only (4 concurrent agents)
 
