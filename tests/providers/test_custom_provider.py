@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.custom_provider import CustomProvider
 
 

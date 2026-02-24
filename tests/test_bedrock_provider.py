@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
-from urllib.error import HTTPError
 
 import botocore.exceptions
 import pytest

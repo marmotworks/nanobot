@@ -5,6 +5,15 @@ import unittest
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from nanobot.channels.dingtalk import (
+    DINGTALK_AVAILABLE,
+    CallbackHandler,
+    DingTalkChannel,
+    NanobotDingTalkHandler,
+)
+
+# Import DingTalk module components before mocking to ensure proper inheritance
+
 # Mock dingtalk_stream SDK before importing the module
 mock_dingtalk_stream = MagicMock()
 mock_ack_message = MagicMock()
@@ -33,16 +42,6 @@ mock_dingtalk_stream.chatbot.ChatbotMessage = mock_chatbot_message
 sys.modules["dingtalk_stream"] = mock_dingtalk_stream
 sys.modules["dingtalk_stream.chatbot"] = MagicMock()
 sys.modules["dingtalk_stream.chatbot"].ChatbotMessage = mock_chatbot_message
-
-# Now import the dingtalk module after mocking
-from nanobot.channels.dingtalk import (
-    CallbackHandler,
-    CallbackMessage,
-    ChatbotMessage,
-    DingTalkChannel,
-    NanobotDingTalkHandler,
-    DINGTALK_AVAILABLE,
-)
 
 
 class TestDingTalkChannelInitialization(TestCase):
