@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -18,8 +19,8 @@ def match_milestone_label(label: str, milestone_num: str) -> bool:
     return label == milestone_num or label.startswith(f"{milestone_num} ")
 
 
-BACKLOG_PATH = Path.home() / ".nanobot/workspace/memory/BACKLOG.md"
-DB_PATH = Path.home() / ".nanobot/workspace/subagents.db"
+BACKLOG_PATH = Path(os.environ.get("BACKLOG_PATH", Path.home() / ".nanobot/workspace/memory/BACKLOG.md"))
+DB_PATH = Path(os.environ.get("DB_PATH", Path.home() / ".nanobot/workspace/subagents.db"))
 
 
 def get_active_labels(db_path: Path) -> set[str]:
@@ -47,7 +48,7 @@ def get_milestone_status(db_path: Path, milestone_num: str) -> str | None:
     try:
         conn = sqlite3.connect(str(db_path))
         cursor = conn.execute(
-            "SELECT status FROM subagents WHERE label = ? OR label LIKE ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT status FROM subagents WHERE label = ? OR label LIKE ? ORDER BY spawned_at DESC LIMIT 1",
             (milestone_num, f"{milestone_num} %")
         )
         row = cursor.fetchone()
@@ -106,6 +107,8 @@ def main() -> int:
                 # Milestone is done - mark with [x]
                 line = m.group(1).replace("[~]", "[x]") + m.group(2) + m.group(3)
                 orphans_reset += 1
+                new_lines.append(line)
+                continue
             elif status in ("running", "pending"):
                 # Still active - don't reset
                 new_lines.append(line)
