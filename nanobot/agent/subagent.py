@@ -779,16 +779,16 @@ class SubagentManager:
 
         narrative = _extract_narrative(result)
 
-        announce_content = f"""[Subagent '{label}' {status_text}]
+        announce_content = f"""[System: subagent] [Subagent '{label}' {status_text}]
 
 Task: {task}
+
+Summary: {narrative}
 
 Result:
 {result}
 
-Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs.
-
-Suggested summary: {narrative}"""
+Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
 
         # Inject as system message to trigger main agent
         msg = InboundMessage(
