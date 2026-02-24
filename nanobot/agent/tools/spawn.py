@@ -72,6 +72,18 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional system prompt template name to use for this subagent (e.g., 'code-fixer', 'planner'). Templates are defined in SUBAGENT_TEMPLATES.",
                 },
+                "temperature": {
+                    "type": "number",
+                    "description": "Sampling temperature (0.0-1.0). Lower = more deterministic. Defaults to model-specific value (e.g. 0.2 for qwen3-coder-next).",
+                },
+                "max_tokens": {
+                    "type": "integer",
+                    "description": "Maximum output tokens. Defaults to model-specific value (e.g. 8192 for qwen3-coder-next).",
+                },
+                "max_iterations": {
+                    "type": "integer",
+                    "description": "Maximum tool-call iterations before the subagent is considered incomplete. Defaults to model-specific value.",
+                },
             },
             "required": ["task"],
         }
@@ -83,6 +95,9 @@ class SpawnTool(Tool):
         model: str | None = None,
         image_path: str | None = None,
         template: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        max_iterations: int | None = None,
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task.
@@ -93,6 +108,9 @@ class SpawnTool(Tool):
             model: Optional model to use for this subagent.
                    If not specified, uses the main agent's model.
                    If model is None, will suggest the appropriate default.
+            temperature: Optional sampling temperature (0.0-1.0).
+            max_tokens: Optional maximum output tokens.
+            max_iterations: Optional maximum tool-call iterations.
 
         Returns:
             Result from subagent or error message if validation fails.
@@ -147,6 +165,9 @@ class SpawnTool(Tool):
                 model=model,
                 image_path=image_path,
                 template=template,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                max_iterations=max_iterations,
             )
             logger.info(
                 "SpawnTool: manager.spawn() returned: {}",
@@ -163,6 +184,9 @@ class SpawnTool(Tool):
             model=model,
             image_path=image_path,
             template=template,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            max_iterations=max_iterations,
         )
         logger.info(
             "SpawnTool: manager.spawn() returned: {}",

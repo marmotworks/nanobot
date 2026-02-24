@@ -59,6 +59,66 @@ Follow these guidelines:
 - If information is not available, state that clearly rather than guessing""",
 }
 
+# Per-model default parameters for subagents
+SUBAGENT_MODEL_DEFAULTS: dict[str, dict[str, Any]] = {
+    "qwen3-coder-next": {"temperature": 0.2, "max_tokens": 8192, "max_iterations": 40},
+    "glm-4.6v-flash": {"temperature": 0.5, "max_tokens": 2048, "max_iterations": 10},
+    "minimax.minimax-m2.1": {"temperature": 0.7, "max_tokens": 8192, "max_iterations": 30},
+}
+
+SUBAGENT_DEFAULT_PARAMS: dict[str, Any] = {
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "max_iterations": 30,
+}
+
+
+def _get_model_defaults(model: str) -> dict[str, Any]:
+    """Get default parameters for a given model.
+
+    Looks up the model in SUBAGENT_MODEL_DEFAULTS (exact match first, then prefix match),
+    falling back to SUBAGENT_DEFAULT_PARAMS.
+
+    Args:
+        model: The model name to look up.
+
+    Returns:
+        Dict with temperature, max_tokens, and max_iterations for the model.
+    """
+    # Exact match first
+    if model in SUBAGENT_MODEL_DEFAULTS:
+        return SUBAGENT_MODEL_DEFAULTS[model]
+
+    # Prefix match (e.g., "qwen3-coder-next" matches "qwen")
+    for model_pattern, defaults in SUBAGENT_MODEL_DEFAULTS.items():
+        if model.startswith(model_pattern):
+            return defaults
+
+    # Fallback to defaults
+    return SUBAGENT_DEFAULT_PARAMS
+
+
+def _extract_narrative(result: str | None) -> str:
+    """Extract a brief narrative from a subagent result for user-facing announcements.
+
+    Returns the first non-empty paragraph, truncated to 300 characters.
+    Returns a warning string if the result is empty or incomplete.
+    """
+    if not result or result.strip() == "":
+        return "⚠️ No result produced."
+    if result.startswith("[INCOMPLETE]"):
+        return "⚠️ Task completed with no output (incomplete)."
+
+    # Split into paragraphs, find the first non-empty one
+    paragraphs = [p.strip() for p in result.split("\n\n") if p.strip()]
+    if not paragraphs:
+        return "⚠️ No result produced."
+
+    narrative = paragraphs[0]
+    if len(narrative) > 300:
+        narrative = narrative[:297] + "..."
+    return narrative
+
 
 class SubagentManager:
     """
@@ -217,6 +277,9 @@ class SubagentManager:
         model: str | None = None,
         image_path: str | None = None,
         template: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        max_iterations: int | None = None,
     ) -> str:
         """
         Spawn a subagent to execute a task in the background.
@@ -228,6 +291,9 @@ class SubagentManager:
             origin_chat_id: The chat ID to announce results to.
             model: Optional model to use for this subagent. If not specified,
                    uses the model configured in __init__.
+            temperature: Optional sampling temperature (0.0-1.0). Defaults to model-specific value.
+            max_tokens: Optional maximum output tokens. Defaults to model-specific value.
+            max_iterations: Optional maximum tool-call iterations. Defaults to model-specific value.
 
         Returns:
             Status message indicating the subagent was started.
@@ -311,7 +377,7 @@ class SubagentManager:
 
         # Create background task
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, model, image_path, template)
+            self._run_subagent(task_id, task, display_label, origin, model, image_path, template, temperature, max_tokens, max_iterations)
         )
         self._running_tasks[task_id] = bg_task
 
@@ -335,6 +401,9 @@ class SubagentManager:
         model: str | None = None,
         image_path: str | None = None,
         template: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        max_iterations: int | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("SubagentManager._run_subagent() called for task_id='{}'", task_id)
@@ -350,6 +419,27 @@ class SubagentManager:
         logger.info("  - Final model to use: '{}'", subagent_model)
 
         logger.info("Subagent [{}] starting task with model: {}", task_id, subagent_model)
+
+        # Resolve effective parameters: per-spawn overrides > per-model defaults > manager defaults
+        model_defaults = _get_model_defaults(subagent_model)
+        effective_temperature = temperature if temperature is not None else model_defaults["temperature"]
+        effective_max_tokens = max_tokens if max_tokens is not None else model_defaults["max_tokens"]
+        effective_max_iterations = max_iterations if max_iterations is not None else model_defaults["max_iterations"]
+
+        logger.info("Subagent [{}] PARAMETER RESOLUTION:", task_id)
+        logger.info("  - Subagent model: '{}'", subagent_model)
+        logger.info(
+            "  - Per-model defaults: temperature={}, max_tokens={}, max_iterations={}",
+            model_defaults["temperature"], model_defaults["max_tokens"], model_defaults["max_iterations"],
+        )
+        logger.info(
+            "  - Per-spawn overrides: temperature={}, max_tokens={}, max_iterations={}",
+            temperature, max_tokens, max_iterations,
+        )
+        logger.info(
+            "  - Effective params: temperature={}, max_tokens={}, max_iterations={}",
+            effective_temperature, effective_max_tokens, effective_max_iterations,
+        )
 
         # Resolve the correct provider for this model
         subagent_provider = await self._get_provider_for_model(subagent_model)
@@ -408,7 +498,7 @@ class SubagentManager:
             ]
 
             # Run agent loop (limited iterations)
-            max_iterations = 30
+            max_iterations = effective_max_iterations
             iteration = 0
             final_result: str | None = None
             first_response_processed = False
@@ -420,8 +510,8 @@ class SubagentManager:
                     messages=messages,
                     tools=tools.get_definitions(),
                     model=subagent_model,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
+                    temperature=effective_temperature,
+                    max_tokens=effective_max_tokens,
                 )
 
                 # Call set_running after first successful response
@@ -499,7 +589,8 @@ class SubagentManager:
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
 
         finally:
-            self.registry.tag_out(task_id, final_status)
+            narrative = _extract_narrative(final_result if final_status == "completed" else None)
+            self.registry.tag_out(task_id, final_status, result_summary=narrative)
 
     async def _announce_result(
         self,
@@ -518,6 +609,8 @@ class SubagentManager:
             else ("completed (incomplete)" if is_incomplete else "completed successfully")
         )
 
+        narrative = _extract_narrative(result)
+
         announce_content = f"""[Subagent '{label}' {status_text}]
 
 Task: {task}
@@ -525,7 +618,9 @@ Task: {task}
 Result:
 {result}
 
-Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
+Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs.
+
+Suggested summary: {narrative}"""
 
         # Inject as system message to trigger main agent
         msg = InboundMessage(
