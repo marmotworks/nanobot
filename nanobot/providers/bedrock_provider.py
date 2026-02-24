@@ -256,6 +256,11 @@ class BedrockProvider(LLMProvider):
 
         text = "\n".join(text_parts) if text_parts else None
 
+        # If no text content was found, the model emitted only reasoningContent or other non-text blocks
+        if text is None:
+            logger.warning("Bedrock response contained no text blocks (model may have emitted only reasoning content)")
+            text = ""  # Return empty response, agent loop will handle
+
         usage = response.get("usage", {})
         usage_dict = {
             "prompt_tokens": usage.get("inputTokens", 0),
@@ -418,7 +423,12 @@ class BedrockProvider(LLMProvider):
                         text_yielded = True
                         yield delta["text"]
                     elif "reasoningContent" in delta:
-                        pass  # skip reasoning deltas in stream
+                        # Log reasoning delta for debugging — don't yield to user
+                        reasoning = delta["reasoningContent"]
+                        thinking = reasoning.get("reasoningText", {})
+                        if isinstance(thinking, dict) and thinking.get("text"):
+                            logger.debug(f"Bedrock stream reasoning delta (not exposed): {thinking['text'][:100]}...")
+                        continue  # skip this delta
                 elif "messageStop" in event:
                     # End of stream
                     break

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanobot.gateway</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>nanobot</string>
+        <string>gateway</string>
+    </array>
+    
+    <key>WorkingDirectory</key>
+    <string>~/</string>
+    
+    <key>KeepAlive</key>
+    <true/>
+    
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    
+    <key>StandardOutPath</key>
+    <string>~/Library/Logs/nanobot/gateway.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>~/Library/Logs/nanobot/gateway-error.log</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+</dict>
+</plist>
