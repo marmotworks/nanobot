@@ -449,7 +449,18 @@ class AgentLoop:
                 channel=channel,
                 chat_id=chat_id,
             )
-            final_content, _, _ = await self._run_agent_loop(messages)
+            # Suppress MessageTool for system messages to prevent double messages
+            # The main agent's text response is the only output we want
+            saved_tools = self.tools
+            self.tools = ToolRegistry()
+            for tool_name in saved_tools.list_names():
+                tool = saved_tools.get(tool_name)
+                if not isinstance(tool, MessageTool):
+                    self.tools.register(tool)
+            try:
+                final_content, _, _ = await self._run_agent_loop(messages)
+            finally:
+                self.tools = saved_tools
             session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
             session.add_message("assistant", final_content or "Background task completed.")
             self.sessions.save(session)
