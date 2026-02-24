@@ -124,6 +124,9 @@ ignore = [
 "nanobot/skills/task-tracker/**/*.py" = [
     "N999",  # module name contains hyphen (directory name convention)
 ]
+"nanobot/skills/log-watcher/**/*.py" = [
+    "N999",  # module name contains hyphen (directory name convention)
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["nanobot"]
