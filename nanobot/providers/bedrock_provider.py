@@ -239,13 +239,13 @@ class BedrockProvider(LLMProvider):
             if "text" in block:
                 text_parts.append(block["text"])
             elif "reasoningContent" in block:
+                # Log reasoning content for debugging — NEVER expose to users
                 reasoning = block["reasoningContent"]
-                # Use reasoning text as fallback if no text block found yet
-                if not text_parts:
-                    thinking = reasoning.get("reasoningText", {})
-                    text = thinking.get("text") if isinstance(thinking, dict) else None
-                    if text:
-                        text_parts.append(text)
+                thinking = reasoning.get("reasoningText", {})
+                if isinstance(thinking, dict) and thinking.get("text"):
+                    logger.debug(f"Bedrock reasoning content (not exposed to user): {thinking['text'][:200]}...")
+                # Do NOT use reasoning as fallback — it's internal model thinking
+                continue  # skip to next block
             elif "toolUse" in block:
                 tool_use = block["toolUse"]
                 tool_calls.append(ToolCallRequest(
