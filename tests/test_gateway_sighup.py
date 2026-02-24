@@ -1,7 +1,7 @@
 """Tests for SIGHUP handler in gateway daemon."""
 
-import tempfile
 from pathlib import Path
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -112,72 +112,72 @@ class TestLaunchdPlist:
     def test_plist_has_required_keys(self):
         """Test that the plist has required launchd keys."""
         from nanobot.cli.daemon_manager import _get_source_plist_path
-        
+
         plist_path = _get_source_plist_path()
         content = plist_path.read_text()
-        
+
         # Check for required keys
         required_keys = ["Label", "ProgramArguments", "KeepAlive"]
         for key in required_keys:
             assert key in content, f"Missing required key: {key}"
-    
+
     def test_plist_has_keepalive_true(self):
         """Test that KeepAlive is set to true for auto-restart."""
         from nanobot.cli.daemon_manager import _get_source_plist_path
-        
+
         plist_path = _get_source_plist_path()
         content = plist_path.read_text()
-        
+
         assert "<key>KeepAlive</key>" in content
         assert "<true/>" in content or "<true />" in content
-    
+
     def test_plist_has_log_paths(self):
         """Test that the plist has standard output/error paths."""
         from nanobot.cli.daemon_manager import _get_source_plist_path
-        
+
         plist_path = _get_source_plist_path()
         content = plist_path.read_text()
-        
+
         assert "StandardOutPath" in content
         assert "StandardErrorPath" in content
 
 
 class TestDaemonManager:
     """Test daemon management functions."""
-    
+
     def test_install_daemon_not_on_macos(self):
         """Test install_daemon returns False when launchctl not found."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError("launchctl not found")
-            
+
             from nanobot.cli.daemon_manager import install_daemon
-            
+
             result = install_daemon()
             assert result is False
-    
+
     def test_uninstall_daemon_not_installed(self):
         """Test uninstall_daemon handles non-installed daemon."""
         with patch("nanobot.cli.daemon_manager._get_plist_path") as mock_path:
             mock_path.return_value = Path("/nonexistent/plist.plist")
-            
+
             # Mock exists to return False
             with patch("pathlib.Path.exists") as mock_exists:
                 mock_exists.return_value = False
-                
+
                 from nanobot.cli.daemon_manager import uninstall_daemon
-                
+
                 result = uninstall_daemon()
                 assert result is False
-    
+
     def test_daemon_status_not_installed(self):
         """Test daemon_status returns 'not_installed' when plist missing."""
         with patch("nanobot.cli.daemon_manager._get_plist_path") as mock_path:
             mock_path.return_value = Path("/nonexistent/plist.plist")
-            
+
             with patch("pathlib.Path.exists") as mock_exists:
                 mock_exists.return_value = False
-                
+
                 from nanobot.cli.daemon_manager import daemon_status
-                
+
                 status = daemon_status()
                 assert status == "not_installed"

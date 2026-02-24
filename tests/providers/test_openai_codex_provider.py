@@ -1,13 +1,11 @@
 """Tests for OpenAICodexProvider."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nanobot.providers.openai_codex_provider import (
-    DEFAULT_CODEX_URL,
     DEFAULT_ORIGINATOR,
-    LLMResponse,
     OpenAICodexProvider,
     _build_headers,
     _convert_messages,
@@ -162,7 +160,7 @@ class TestConvertMessages:
         """Test assistant message with text converts correctly."""
         messages = [{"role": "assistant", "content": "Hi there!"}]
 
-        system_prompt, input_items = _convert_messages(messages)
+        _, input_items = _convert_messages(messages)
 
         assert len(input_items) == 1
         assert input_items[0]["type"] == "message"
@@ -189,7 +187,7 @@ class TestConvertMessages:
             }
         ]
 
-        system_prompt, input_items = _convert_messages(messages)
+        _, input_items = _convert_messages(messages)
 
         assert len(input_items) == 1
         assert input_items[0]["type"] == "function_call"
@@ -206,7 +204,7 @@ class TestConvertMessages:
             }
         ]
 
-        system_prompt, input_items = _convert_messages(messages)
+        _, input_items = _convert_messages(messages)
 
         assert len(input_items) == 1
         assert input_items[0]["type"] == "function_call_output"
