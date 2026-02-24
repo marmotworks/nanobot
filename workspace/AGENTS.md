@@ -162,6 +162,51 @@ Every subagent task must be sized to fit well within the model's context window 
 - **Progressive decomposition** — for large features, start with a planning subagent that reads the relevant files and produces a milestone breakdown. Then dispatch one subagent per milestone.
 - **Context budget** — assume each subagent has ~32k tokens of usable context. A task brief + one file + verification commands should comfortably fit. If you need to include multiple files, keep them short or include only the relevant sections.
 
+## Planning Gate (Mandatory)
+
+**Any task that touches more than one file OR has more than ~3 logical changes MUST go through a planning subagent first — no exceptions.**
+
+### Planning subagent rules:
+- Dispatch with `template: nanobot-coder`, `model: qwen3-coder-next`, `max_iterations: 40`
+- Planning subagent reads relevant files, produces a milestone list in standard format
+- Each milestone: one file, one criterion, one verifiable command
+- Review the plan before dispatching execution subagents
+
+### Execution subagent rules:
+- Always use `template: nanobot-coder` for nanobot code tasks
+- Always use `max_iterations: 40` — 30 is not enough for complex tasks
+- One milestone per subagent — never bundle milestones
+- Write the task brief to a file in `~/.nanobot/workspace/tasks/` and pass the path to the subagent
+
+## Planning Gate (Mandatory for Non-Trivial Tasks)
+
+**Any task that touches more than one file OR has more than ~3 logical changes MUST go through a planning subagent first.**
+
+### When the planning gate applies:
+- Feature work touching multiple files
+- Refactors that span more than one module
+- Any task where the approach is not yet fully clear
+- Tasks estimated at >1 subagent execution
+
+### Planning subagent requirements:
+- Use `template: nanobot-coder` for all nanobot code planning tasks
+- Use `model: qwen3-coder-next`
+- Task brief must ask the planning subagent to: read relevant files, propose a milestone breakdown, and write milestones to BACKLOG.md
+- Each proposed milestone must touch exactly one file and have one measurable criterion
+- If a proposed milestone is still too large, the planning subagent must split it further
+
+### After planning:
+- Review the milestone plan before dispatching execution subagents
+- For user-facing tasks, present the plan and get approval before executing
+- For backlog cron tasks, auto-approve if milestones are well-formed
+
+### Execution subagent requirements (nanobot code tasks):
+- Always use `template: nanobot-coder`
+- Always use `model: qwen3-coder-next`
+- Always use `max_iterations: 40` (nanobot code tasks are complex)
+- One milestone per subagent — never bundle multiple milestones
+- Task brief must include: the single file to edit, the exact change, the verification command
+
 ## Backlog Management (Two-Phase Dispatch)
 
 The backlog lives at `~/.nanobot/workspace/memory/BACKLOG.md`. A cron job fires every 15 minutes to advance work when capacity is idle. The cron handler follows a strict two-phase pattern:

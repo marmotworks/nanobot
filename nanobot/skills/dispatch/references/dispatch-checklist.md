@@ -41,6 +41,8 @@ Call the `spawn` tool with:
 - `task`: the full task brief from Step 2
 - `label`: `"Planning: <task name>"` (e.g. `"Planning: Task 5 Research"`)
 - `model`: `"qwen3-coder-next"` (always — for technical tasks)
+- `template`: `"nanobot-coder"` (always — for ALL nanobot code tasks, no exceptions)
+- `max_iterations`: `40` (planning tasks need room to read files and write milestones; 30 is not enough)
 
 ### Step 6: Verify spawn succeeded
 
@@ -98,6 +100,8 @@ Call the `spawn` tool with:
 - `task`: the full task brief from Step 2
 - `label`: `"N.M <short title>"` (e.g. `"6.3 Implement streaming"`)
 - `model`: `"qwen3-coder-next"` (always — for technical tasks)
+- `template`: `"nanobot-coder"` (always — for ALL nanobot code tasks, no exceptions)
+- `max_iterations`: `40` (nanobot code tasks are complex; 30 is not enough — this is non-negotiable)
 
 **The spawn tool call MUST appear in the same response as any announcement. Never announce a dispatch without immediately calling the tool.**
 
