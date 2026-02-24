@@ -494,6 +494,8 @@ class AgentLoop:
                 ] if session.keep_count > 0 else session.messages[session.last_consolidated :]
 
                 success = await self._consolidate_memory(session, archive_all=True)
+                if not success:
+                    logger.error("Memory consolidation failed during archive_all")
 
                 if success:
                     # Clear session only after successful archival
